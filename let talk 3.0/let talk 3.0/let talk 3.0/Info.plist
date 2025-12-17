@@ -92,7 +92,7 @@
 
 	<!-- Supabase Configuration -->
 	<key>SUPABASE_URL</key>
-	<string>https://YOUR_PROJECT_REF.supabase.co</string>
+	<string>https://tbjsaubpwyloyjpiibbr.supabase.co</string>
 	<key>SUPABASE_ANON_KEY</key>
 	<string>YOUR_SUPABASE_ANON_KEY</string>
 	<key>SUPABASE_STORAGE_BUCKET</key>
