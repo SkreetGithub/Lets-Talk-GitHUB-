@@ -1,0 +1,11 @@
+# macOS
+**/.DS_Store
+**/__MACOSX/
+
+# Xcode user data
+**/xcuserdata/
+**/*.xcuserstate
+
+# SwiftPM (optional)
+# If you prefer to commit Package.resolved, remove this.
+**/.swiftpm/
