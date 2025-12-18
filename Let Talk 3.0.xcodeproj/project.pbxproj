@@ -20,14 +20,6 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "Let Talk 3.0";
 			sourceTree = "<group>";
-			exceptions = (
-				F2A3F5142EF47A6B00FBF7D7 /* Info.plist exception */,
-			);
-		};
-		F2A3F5142EF47A6B00FBF7D7 /* Info.plist exception */ = {
-			isa = PBXFileSystemSynchronizedBuildFileException;
-			fileSystemExceptionAction = 0;
-			fileSystemExceptionPath = "Info.plist";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
@@ -144,7 +136,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Ensure Info.plist is not copied as a resource\n# Info.plist should only be processed via INFOPLIST_FILE build setting\necho \"Info.plist will be processed via INFOPLIST_FILE, not as a resource\"\n";
+			shellScript = "# This script ensures Info.plist is NOT in Copy Bundle Resources\n# Info.plist should only be processed via INFOPLIST_FILE build setting\necho \"Checking Info.plist configuration...\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
