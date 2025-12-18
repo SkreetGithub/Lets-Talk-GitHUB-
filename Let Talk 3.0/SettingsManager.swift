@@ -240,6 +240,21 @@ final class SettingsManager: ObservableObject {
         settings.translation.autoTranslate = enabled
         saveSettings()
     }
+    
+    func setVoiceEnabled(_ enabled: Bool) {
+        settings.translation.voiceEnabled = enabled
+        saveSettings()
+    }
+    
+    func setTranslationProvider(_ provider: TranslationProvider) {
+        settings.translation.provider = provider
+        saveSettings()
+    }
+    
+    func setTranslationConfidence(_ confidence: Float) {
+        settings.translation.confidence = confidence
+        saveSettings()
+    }
 
     // MARK: - Reset Settings
 

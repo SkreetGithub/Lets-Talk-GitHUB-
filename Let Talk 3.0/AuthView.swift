@@ -254,9 +254,3 @@ struct ForgotPasswordView: View {
     }
 }
 
-struct AuthView_Previews: PreviewProvider {
-    static var previews: some View {
-        AuthView()
-            .environmentObject(AuthManager.shared)
-    }
-}

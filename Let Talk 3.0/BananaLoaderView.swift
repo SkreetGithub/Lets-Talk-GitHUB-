@@ -91,8 +91,3 @@ struct BananaLoaderView: View {
     }
 }
 
-struct BananaLoaderView_Previews: PreviewProvider {
-    static var previews: some View {
-        BananaLoaderView()
-    }
-}

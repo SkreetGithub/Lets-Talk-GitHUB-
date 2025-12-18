@@ -248,8 +248,3 @@ struct StatusRow: View {
     }
 }
 
-struct AppStatusView_Previews: PreviewProvider {
-    static var previews: some View {
-        AppStatusView()
-    }
-}
