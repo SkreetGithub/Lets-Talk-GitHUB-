@@ -16,8 +16,13 @@ class BiometricAuthService: ObservableObject {
         let context = LAContext()
         var error: NSError?
         
-        isBiometricAvailable = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
-        biometricType = context.biometryType
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            isBiometricAvailable = true
+            biometricType = context.biometryType
+        } else {
+            isBiometricAvailable = false
+            biometricType = .none
+        }
     }
     
     func authenticateWithBiometrics() async throws {

@@ -177,7 +177,8 @@ final class AuthManager: ObservableObject {
             let url = try await SupabaseStorageService.shared.uploadProfileImage(profileImage, userId: userId)
             update["photo_url"] = .string(url)
         } else if let photoURL {
-            update["photo_url"] = .string(photoURL) }
+            update["photo_url"] = .string(photoURL)
+        }
 
         if !update.isEmpty {
             try await updateProfileFields(userId: userId, fields: update)
@@ -272,7 +273,7 @@ final class AuthManager: ObservableObject {
         } catch {
             // If the profile doesn't exist yet, create a minimal one.
             do {
-                let email = (try? await client.auth.session?.user.email) ?? ""
+                let email = (try? await client.auth.session)?.user.email ?? ""
                 try await upsertProfile(ProfileRow(
                     id: userId,
                     email: email,
