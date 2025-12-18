@@ -20,6 +20,14 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "Let Talk 3.0";
 			sourceTree = "<group>";
+			exceptions = (
+				F2A3F5142EF47A6B00FBF7D7 /* Info.plist exception */,
+			);
+		};
+		F2A3F5142EF47A6B00FBF7D7 /* Info.plist exception */ = {
+			isa = PBXFileSystemSynchronizedBuildFileException;
+			fileSystemExceptionAction = 0;
+			fileSystemExceptionPath = "Info.plist";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
