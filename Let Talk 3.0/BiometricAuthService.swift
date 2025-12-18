@@ -53,9 +53,3 @@ class BiometricAuthService: ObservableObject {
         }
     }
 }
-
-// MARK: - Auth Error Extensions
-extension AuthError {
-    static let biometricNotAvailableError = AuthError.biometricNotAvailable
-    static let biometricFailedError = AuthError.biometricFailed
-}

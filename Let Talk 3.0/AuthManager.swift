@@ -357,6 +357,8 @@ enum AuthError: Error, LocalizedError {
     case networkError
     case googleSignInNotAvailable
     case userNotFound
+    case biometricNotAvailable
+    case biometricFailed
     case custom(String)
 
     var errorDescription: String? {
@@ -367,6 +369,10 @@ enum AuthError: Error, LocalizedError {
             return "Google Sign-In is not available."
         case .userNotFound:
             return "User not found"
+        case .biometricNotAvailable:
+            return "Biometric authentication is not available"
+        case .biometricFailed:
+            return "Biometric authentication failed"
         case .custom(let message):
             return message
         }

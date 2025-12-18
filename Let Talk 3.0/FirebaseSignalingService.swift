@@ -183,7 +183,7 @@ final class FirebaseSignalingService: ObservableObject {
                 .limit(5)
                 .execute()
 
-            let calls = try decoder.decode([CallRow].self, from: response.data)
+            let calls = try decoder.decode([CallRowData].self, from: response.data)
 
             for call in calls {
                 notify { $0.firebaseSignaling(self, didReceiveIncomingCall: call.asCall) }
@@ -214,7 +214,7 @@ final class FirebaseSignalingService: ObservableObject {
                 .single()
                 .execute()
 
-            let row = try decoder.decode(CallRow.self, from: response.data)
+            let row = try decoder.decode(CallRowData.self, from: response.data)
             notify { $0.firebaseSignaling(self, didReceiveCallUpdate: row.asCall) }
         } catch {
             notify { $0.firebaseSignaling(self, didReceiveError: error) }
@@ -381,7 +381,7 @@ enum SignalingError: Error, LocalizedError {
 
 // MARK: - Supabase Row Decoding
 
-private struct CallRow: Codable {
+private struct CallRowData: Codable {
     let id: String
     let callerId: String
     let calleeId: String

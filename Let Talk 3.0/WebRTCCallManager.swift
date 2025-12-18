@@ -71,12 +71,12 @@ class WebRTCCallManager: NSObject, ObservableObject {
         let callId = try await signalingService.createCall(to: userId, isVideo: isVideo)
         currentCall = Call(
             id: callId,
-            callerId: AuthManager.shared.currentUserId ?? \"\",
+            callerId: AuthManager.shared.currentUserId ?? "",
             calleeId: userId,
             isVideo: isVideo,
             status: .initiated,
             createdAt: Date(),
-            participants: [AuthManager.shared.currentUserId ?? \"\", userId]
+            participants: [AuthManager.shared.currentUserId ?? "", userId]
         )
         
         // Create peer connection
@@ -114,12 +114,12 @@ class WebRTCCallManager: NSObject, ObservableObject {
         // Keep a local reference for subsequent signaling sends.
         currentCall = Call(
             id: callId,
-            callerId: currentCall?.callerId ?? \"\",
-            calleeId: AuthManager.shared.currentUserId ?? \"\",
+            callerId: currentCall?.callerId ?? "",
+            calleeId: AuthManager.shared.currentUserId ?? "",
             isVideo: isVideo,
             status: .answered,
             createdAt: Date(),
-            participants: [currentCall?.callerId ?? \"\", AuthManager.shared.currentUserId ?? \"\"].filter { !$0.isEmpty }
+            participants: [currentCall?.callerId ?? "", AuthManager.shared.currentUserId ?? ""].filter { !$0.isEmpty }
         )
         
         // Create peer connection

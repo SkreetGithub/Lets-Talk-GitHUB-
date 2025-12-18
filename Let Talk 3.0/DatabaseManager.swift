@@ -156,7 +156,7 @@ final class DatabaseManager: ObservableObject {
             .contains("participants", value: [userId])
             .execute()
 
-        let rows = try decoder.decode([ChatRow].self, from: response.data)
+        let rows = try decoder.decode([ChatRowData].self, from: response.data)
         return rows.map { $0.asChat }
     }
 
@@ -197,7 +197,7 @@ final class DatabaseManager: ObservableObject {
             .order("name", ascending: true)
             .execute()
 
-        let rows = try decoder.decode([ContactRow].self, from: response.data)
+        let rows = try decoder.decode([ContactRowData].self, from: response.data)
         return rows.map { $0.asContact }
     }
 
@@ -369,7 +369,7 @@ private struct MessageRow: Codable {
     }
 }
 
-private struct ChatRow: Codable {
+private struct ChatRowData: Codable {
     let id: String
     let participants: [String]
     let createdAt: Date?
@@ -430,7 +430,7 @@ private struct ChatLastMessageRow: Codable {
     }
 }
 
-private struct ContactRow: Codable {
+private struct ContactRowData: Codable {
     let id: String
     let name: String
     let phone: String
