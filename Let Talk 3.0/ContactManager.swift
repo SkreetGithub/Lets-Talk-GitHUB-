@@ -139,6 +139,14 @@ final class ContactManager: ObservableObject {
         }
     }
 
+    // MARK: - Phone Number Generation
+
+    func generatePhoneNumber(for countryCode: String) -> String {
+        let areaCode = Int.random(in: 200...999)
+        let randomNumber = Int.random(in: 1000000...9999999)
+        return "\(countryCode)\(areaCode)\(randomNumber)"
+    }
+
     // MARK: - Demo Data
 
     func loadDemoContacts() {

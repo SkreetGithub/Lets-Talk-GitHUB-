@@ -64,8 +64,13 @@ final class FirebaseSignalingService: ObservableObject {
             participants: [currentUserId, targetUserId]
         )
 
+        // Convert dictionary to JSON-serializable format
+        let callDict = call.toDictionary()
+        let jsonData = try JSONSerialization.data(withJSONObject: callDict)
+        let jsonDict = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] ?? callDict
+        
         _ = try await client.from("calls")
-            .insert(call.toDictionary())
+            .insert(jsonDict)
             .execute()
 
         listenForCallUpdates(callId: callId)
@@ -77,12 +82,17 @@ final class FirebaseSignalingService: ObservableObject {
             throw SignalingError.userNotAuthenticated
         }
 
+        // Ensure proper JSON serialization
+        let updateData: [String: Any] = [
+            "status": CallStatus.answered.rawValue,
+            "answered_at": ISO8601DateFormatter().string(from: Date()),
+            "is_video": isVideo
+        ]
+        let jsonData = try JSONSerialization.data(withJSONObject: updateData)
+        let jsonDict = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] ?? updateData
+        
         _ = try await client.from("calls")
-            .update([
-                "status": CallStatus.answered.rawValue,
-                "answered_at": ISO8601DateFormatter().string(from: Date()),
-                "is_video": isVideo
-            ])
+            .update(jsonDict)
             .eq("id", value: callId)
             .execute()
 

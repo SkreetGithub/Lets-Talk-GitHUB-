@@ -41,16 +41,15 @@ final class AuthManager: ObservableObject {
                     Task { @MainActor in self.isLoading = false }
                 }
 
-                guard let session else {
+                if let session = session {
+                    await fetchUserProfile(userId: session.user.id.uuidString)
+                } else {
                     await MainActor.run {
                         self.currentUser = nil
                         self.isAuthenticated = false
                         self.needsPhoneVerification = false
                     }
-                    continue
                 }
-
-                await fetchUserProfile(userId: session.user.id.uuidString)
             }
         }
     }
@@ -197,9 +196,15 @@ final class AuthManager: ObservableObject {
         let encoded = try JSONEncoder().encode(current)
         let json = try JSONSerialization.jsonObject(with: encoded) as? [Any] ?? []
 
-        try await updateProfileFields(userId: userId, fields: [
-            "saved_phone_numbers": .array(json.map { AnyJSON.any($0) })
-        ])
+        // Convert array elements to AnyJSON and then to proper types
+        let jsonArray = json.map { AnyJSON.any($0) }
+        var updateDict: [String: Any] = [:]
+        updateDict["saved_phone_numbers"] = jsonArray.map { $0.value }
+        
+        _ = try await client.from("profiles")
+            .update(updateDict)
+            .eq("id", value: userId)
+            .execute()
 
         await fetchUserProfile(userId: userId)
     }
@@ -307,6 +312,7 @@ final class AuthManager: ObservableObject {
     }
 
     private func updateProfileFields(userId: String, fields: [String: AnyJSON]) async throws {
+        // Convert AnyJSON to their underlying values
         var dict: [String: Any] = [:]
         for (k, v) in fields {
             dict[k] = v.value

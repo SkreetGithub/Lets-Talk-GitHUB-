@@ -304,6 +304,7 @@ final class DatabaseManager: ObservableObject {
     }
 
     private func updateLastMessage(chatId: String, message: Message) async throws {
+        // Convert to JSON-serializable types
         let lastMessage: [String: Any] = [
             "content": message.content,
             "sender_id": message.senderId,
@@ -312,11 +313,18 @@ final class DatabaseManager: ObservableObject {
             "is_read": message.status == .read
         ]
 
+        // Encode and decode to ensure proper types
+        let jsonData = try JSONSerialization.data(withJSONObject: [
+            "last_message": lastMessage,
+            "last_updated": ISO8601DateFormatter().string(from: Date())
+        ])
+        let updateDict = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] ?? [
+            "last_message": lastMessage,
+            "last_updated": ISO8601DateFormatter().string(from: Date())
+        ]
+
         _ = try await client.from("chats")
-            .update([
-                "last_message": lastMessage,
-                "last_updated": ISO8601DateFormatter().string(from: Date())
-            ])
+            .update(updateDict)
             .eq("id", value: chatId)
             .execute()
     }
