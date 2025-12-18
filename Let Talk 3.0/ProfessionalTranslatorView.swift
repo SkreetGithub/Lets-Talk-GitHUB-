@@ -141,12 +141,12 @@ struct ProfessionalTranslatorView: View {
                 ]
             )
         }
-        .onChange(of: scannedImage) { image in
+        .onChange(of: scannedImage) { oldValue, image in
             if let image = image {
                 viewModel.processImage(image)
             }
         }
-        .onChange(of: selectedImage) { image in
+        .onChange(of: selectedImage) { oldValue, image in
             if let image = image {
                 viewModel.processImage(image)
             }
@@ -161,7 +161,7 @@ struct ProfessionalTranslatorView: View {
         } message: {
             Text("Are you sure you want to sign out?")
         }
-        .onChange(of: authManager.isAuthenticated) { isAuthenticated in
+        .onChange(of: authManager.isAuthenticated) { oldValue, isAuthenticated in
             if !isAuthenticated {
                 dismiss()
             }

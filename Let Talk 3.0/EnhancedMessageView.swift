@@ -159,7 +159,7 @@ struct EnhancedMessageView: View {
             .onAppear {
                 scrollToBottom(proxy: proxy)
             }
-            .onChange(of: messages.count) { _ in
+            .onChange(of: messages.count) { oldValue, newValue in
                 scrollToBottom(proxy: proxy)
             }
         }

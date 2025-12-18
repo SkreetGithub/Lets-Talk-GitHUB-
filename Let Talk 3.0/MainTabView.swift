@@ -81,7 +81,7 @@ struct MainTabView: View {
                 .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
                 .animation(.easeInOut(duration: 0.3), value: selectedTab)
                 .gesture(swipeGesture)
-                .onChange(of: selectedTab) { newTab in
+                .onChange(of: selectedTab) { oldValue, newTab in
                     handleTabChange(newTab)
                 }
                 
@@ -671,7 +671,7 @@ struct SettingsView: View {
         .sheet(isPresented: $showThemeSettings) {
             ThemeSettingsView()
         }
-        .onChange(of: authManager.isAuthenticated) { isAuthenticated in
+        .onChange(of: authManager.isAuthenticated) { oldValue, isAuthenticated in
             if !isAuthenticated {
                 // Automatically dismiss settings when user is signed out
                 presentationMode.wrappedValue.dismiss()

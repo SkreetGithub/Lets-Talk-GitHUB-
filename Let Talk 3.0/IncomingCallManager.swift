@@ -221,7 +221,7 @@ struct IncomingCallView: View {
                     ))
             }
         }
-        .onChange(of: callManager.isShowingIncomingCall) { isShowing in
+        .onChange(of: callManager.isShowingIncomingCall) { oldValue, isShowing in
             if !isShowing {
                 showCallInterface = false
             }

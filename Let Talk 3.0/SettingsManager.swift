@@ -157,6 +157,26 @@ final class SettingsManager: ObservableObject {
         settings.notifications = notifications
         saveSettings()
     }
+    
+    func setMessageNotifications(_ enabled: Bool) {
+        settings.notifications.messages = enabled
+        saveSettings()
+    }
+    
+    func setCallNotifications(_ enabled: Bool) {
+        settings.notifications.calls = enabled
+        saveSettings()
+    }
+    
+    func setTranslationNotifications(_ enabled: Bool) {
+        settings.notifications.translations = enabled
+        saveSettings()
+    }
+    
+    func setPushNotifications(_ enabled: Bool) {
+        settings.notifications.push = enabled
+        saveSettings()
+    }
 
     // MARK: - Privacy Settings
 
@@ -176,11 +196,36 @@ final class SettingsManager: ObservableObject {
         settings.audio.volume = volume
         saveSettings()
     }
+    
+    func setVibration(_ enabled: Bool) {
+        settings.audio.vibration = enabled
+        saveSettings()
+    }
+    
+    func setSpeakerMode(_ enabled: Bool) {
+        settings.audio.speakerMode = enabled
+        saveSettings()
+    }
 
     // MARK: - Video Settings
 
     func updateVideoSettings(_ video: AppSettings.VideoSettings) {
         settings.video = video
+        saveSettings()
+    }
+    
+    func setVideoQuality(_ quality: VideoQuality) {
+        settings.video.quality = quality
+        saveSettings()
+    }
+    
+    func setAutoStartVideo(_ enabled: Bool) {
+        settings.video.autoStart = enabled
+        saveSettings()
+    }
+    
+    func setMirrorFrontCamera(_ enabled: Bool) {
+        settings.video.mirrorFrontCamera = enabled
         saveSettings()
     }
 

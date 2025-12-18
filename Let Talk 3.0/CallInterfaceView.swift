@@ -47,7 +47,7 @@ struct CallInterfaceView: View {
         .onTapGesture {
             toggleControls()
         }
-        .onChange(of: callManager.callStatus) { status in
+        .onChange(of: callManager.callStatus) { oldValue, status in
             handleCallStatusChange(status)
         }
     }

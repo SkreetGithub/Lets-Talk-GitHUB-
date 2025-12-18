@@ -53,8 +53,8 @@ struct ComprehensiveChatsView: View {
         .onAppear {
             viewModel.loadChats()
         }
-        .onChange(of: authManager.isAuthenticated) { isAuthenticated in
-            if isAuthenticated {
+        .onChange(of: authManager.isAuthenticated) { oldValue, newValue in
+            if newValue {
                 viewModel.loadChats()
             } else {
                 viewModel.clearChats()

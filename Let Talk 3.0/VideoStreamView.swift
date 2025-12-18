@@ -212,7 +212,7 @@ struct VideoStreamView: View, TranslationEnabled {
         } message: {
             Text(errorMessage ?? "Unknown error occurred")
         }
-        .onChange(of: isStreaming) { streaming in
+        .onChange(of: isStreaming) { oldValue, streaming in
             if streaming {
                 handleConnectionStateChange(.connected)
             }

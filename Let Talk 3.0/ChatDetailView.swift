@@ -94,7 +94,7 @@ struct ChatDetailView: View {
                 .padding(.horizontal)
                 .padding(.top)
             }
-            .onChange(of: viewModel.messages) { _ in
+            .onChange(of: viewModel.messages) { oldValue, newValue in
                 if scrollToBottom {
                     withAnimation {
                         proxy.scrollTo(viewModel.messages.last?.id, anchor: .bottom)

@@ -82,11 +82,11 @@ struct Let_Talk_3_0App: App {
             .onAppear {
                 startSplashTimer()
             }
-            .onChange(of: authManager.isAuthenticated) { isAuthenticated in
+            .onChange(of: authManager.isAuthenticated) { oldValue, newValue in
                 // Force UI update when authentication state changes
                 // This ensures the navigation happens immediately
-                print("Authentication state changed: \(isAuthenticated)")
-                
+                print("Authentication state changed: \(newValue)")
+
                 // Ensure splash screen is dismissed when auth state changes
                 if isSplashActive {
                     dismissSplashScreen()

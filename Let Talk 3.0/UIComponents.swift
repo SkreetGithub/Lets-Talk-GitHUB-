@@ -219,7 +219,7 @@ struct PhoneNumberGeneratorView: View {
                     }
                 }
                 .pickerStyle(MenuPickerStyle())
-                .onChange(of: selectedCountry) { _ in
+                .onChange(of: selectedCountry) { oldValue, newValue in
                     selectedAreaCode = ""
                     generatedNumbers = []
                     showingNumbers = false
@@ -242,7 +242,7 @@ struct PhoneNumberGeneratorView: View {
                         }
                     }
                     .pickerStyle(MenuPickerStyle())
-                    .onChange(of: selectedAreaCode) { _ in
+                    .onChange(of: selectedAreaCode) { oldValue, newValue in
                         generatedNumbers = []
                         showingNumbers = false
                     }

@@ -196,10 +196,10 @@ struct CallTestingView: View {
         .onAppear {
             setupCallManager()
         }
-        .onChange(of: callManager.connectionState) { state in
+        .onChange(of: callManager.connectionState) { oldValue, state in
             updateConnectionStatus()
         }
-        .onChange(of: callManager.callStatus) { status in
+        .onChange(of: callManager.callStatus) { oldValue, status in
             updateCallStatus()
         }
         .fullScreenCover(isPresented: $showCallInterface) {
