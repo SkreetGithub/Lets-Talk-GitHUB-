@@ -8,6 +8,8 @@
 
 /* Begin PBXFileReference section */
 		F2A3F5092EF47A6B00FBF7D7 /* Let Talk 3.0.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Let Talk 3.0.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		F2A3F50E2EF47A6B00FBF7D7 /* Supabase */ = {isa = XCSwiftPackageProductDependency; package = F2A3F50F2EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "supabase-swift" */; productName = Supabase; };
+		F2A3F5102EF47A6B00FBF7D7 /* WebRTC */ = {isa = XCSwiftPackageProductDependency; package = F2A3F5112EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "webrtc-ios" */; productName = WebRTC; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -23,6 +25,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F2A3F5122EF47A6B00FBF7D7 /* Supabase in Frameworks */,
+				F2A3F5132EF47A6B00FBF7D7 /* WebRTC in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -66,6 +70,8 @@
 			);
 			name = "Let Talk 3.0";
 			packageProductDependencies = (
+				F2A3F50E2EF47A6B00FBF7D7 /* Supabase */,
+				F2A3F5102EF47A6B00FBF7D7 /* WebRTC */,
 			);
 			productName = "Let Talk 3.0";
 			productReference = F2A3F5092EF47A6B00FBF7D7 /* Let Talk 3.0.app */;
@@ -99,6 +105,10 @@
 			productRefGroup = F2A3F50A2EF47A6B00FBF7D7 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
+			packageReferences = (
+				F2A3F50F2EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+				F2A3F5112EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "webrtc-ios" */,
+			);
 			targets = (
 				F2A3F5082EF47A6B00FBF7D7 /* Let Talk 3.0 */,
 			);
@@ -351,6 +361,43 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		F2A3F50F2EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.0;
+			};
+		};
+		F2A3F5112EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "webrtc-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stasel/WebRTC";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 114.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		F2A3F50E2EF47A6B00FBF7D7 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F2A3F50F2EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+		F2A3F5102EF47A6B00FBF7D7 /* WebRTC */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F2A3F5112EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "webrtc-ios" */;
+			productName = WebRTC;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+/* Begin PBXBuildFile section */
+		F2A3F5122EF47A6B00FBF7D7 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = F2A3F50E2EF47A6B00FBF7D7 /* Supabase */; };
+		F2A3F5132EF47A6B00FBF7D7 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = F2A3F5102EF47A6B00FBF7D7 /* WebRTC */; };
+/* End PBXBuildFile section */
 	};
 	rootObject = F2A3F5012EF47A6A00FBF7D7 /* Project object */;
 }
