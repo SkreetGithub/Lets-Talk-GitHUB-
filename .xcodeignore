@@ -1,0 +1,4 @@
+# Exclude Info.plist from being copied as a resource
+# It should only be processed via INFOPLIST_FILE build setting
+Info.plist
+

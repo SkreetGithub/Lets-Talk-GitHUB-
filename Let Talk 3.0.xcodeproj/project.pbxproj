@@ -123,7 +123,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Remove Info.plist from Copy Bundle Resources if it exists\nif [ -f \"${SRCROOT}/Let Talk 3.0/Info.plist\" ]; then\n    echo \"Info.plist found - ensuring it's not in Copy Bundle Resources\"\nfi\n";
+			shellScript = "# Ensure Info.plist is not copied as a resource\n# Info.plist should only be processed via INFOPLIST_FILE build setting\necho \"Info.plist will be processed via INFOPLIST_FILE, not as a resource\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
