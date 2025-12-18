@@ -40,7 +40,7 @@ class IncomingCallManager: ObservableObject {
             isVideo: isVideo,
             status: .initiated,
             createdAt: Date(),
-            participants: [callerId, AuthManager.shared.currentUserId ?? \"\"].filter { !$0.isEmpty }
+            participants: [callerId, AuthManager.shared.currentUserId ?? ""].filter { !$0.isEmpty }
         )
         
         DispatchQueue.main.async {

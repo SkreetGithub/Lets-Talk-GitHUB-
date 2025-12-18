@@ -1,6 +1,8 @@
 import SwiftUI
 import UserNotifications
+#if canImport(ActivityKit)
 import ActivityKit
+#endif
 
 typealias ActivityID = String
 
@@ -14,7 +16,9 @@ class NotificationManager: NSObject, ObservableObject {
     @Published var notifications: [AppNotification] = []
     @Published var unreadCount = 0
     
+    #if canImport(ActivityKit)
     private var activities: [ActivityID: Activity<CallAttributes>] = [:]
+    #endif
     private var notificationQueue: [AppNotification] = []
     
     override init() {
@@ -69,6 +73,7 @@ class NotificationManager: NSObject, ObservableObject {
     }
     
     func startCallActivity(caller: String, isVideo: Bool, callerId: String, callerImage: String?) {
+        #if canImport(ActivityKit)
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         
         let initialState = CallAttributes.ContentState(
@@ -98,9 +103,14 @@ class NotificationManager: NSObject, ObservableObject {
         } catch {
             print("Error starting call activity: \(error)")
         }
+        #else
+        // ActivityKit not available - fallback to regular notifications
+        print("ActivityKit not available on this platform")
+        #endif
     }
     
     func updateCallActivity(id: ActivityID, state: CallAttributes.ContentState) async {
+        #if canImport(ActivityKit)
         guard let activity = activities[id] else { return }
         
         do {
@@ -113,15 +123,18 @@ class NotificationManager: NSObject, ObservableObject {
         } catch {
             print("Error updating call activity: \(error)")
         }
+        #endif
     }
     
     func endCallActivity(id: ActivityID) {
+        #if canImport(ActivityKit)
         guard let activity = activities[id] else { return }
         
         Task {
             await activity.end(dismissalPolicy: .immediate)
             activities.removeValue(forKey: id)
         }
+        #endif
     }
     
     // MARK: - In-App Notifications
@@ -336,6 +349,7 @@ extension Notification.Name {
 }
 
 // MARK: - Live Activity Attributes
+#if canImport(ActivityKit)
 struct CallAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
         var callerName: String
@@ -351,6 +365,24 @@ struct CallAttributes: ActivityAttributes {
         }
     }
 }
+#else
+// Fallback for platforms without ActivityKit
+struct CallAttributes {
+    public struct ContentState: Codable, Hashable {
+        var callerName: String
+        var callerImage: String?
+        var isVideoCall: Bool
+        var callState: CallState
+        
+        enum CallState: String, Codable {
+            case incoming
+            case outgoing
+            case connected
+            case ended
+        }
+    }
+}
+#endif
 
 // MARK: - View Extension for Notification Overlay
 extension View {
