@@ -117,7 +117,7 @@ final class AuthManager: ObservableObject {
         // NOTE: This app's "phone verification" flow is local UI-driven.
         // If you want true SMS verification, switch this to Supabase phone OTP.
         try await updateProfileFields(userId: userId, fields: [
-            "phone": phoneNumber
+            "phone": .string(phoneNumber)
         ])
 
         await fetchUserProfile(userId: userId)
@@ -169,20 +169,21 @@ final class AuthManager: ObservableObject {
     ) async throws {
         guard let userId = currentUserId else { return }
 
-        var update: [String: AnyJSON] = [:]
-        if let name { update["name"] = .string(name) }
-        if let phone { update["phone"] = .string(phone) }
+        var update = ProfileUpdate()
+        if let name { update.name = name }
+        if let phone { update.phone = phone }
 
         if let profileImage {
             let url = try await SupabaseStorageService.shared.uploadProfileImage(profileImage, userId: userId)
-            update["photo_url"] = .string(url)
+            update.photoURL = url
         } else if let photoURL {
-            update["photo_url"] = .string(photoURL)
+            update.photoURL = photoURL
         }
 
-        if !update.isEmpty {
-            try await updateProfileFields(userId: userId, fields: update)
-        }
+        _ = try await client.from("profiles")
+            .update(update)
+            .eq("id", value: userId)
+            .execute()
 
         await fetchUserProfile(userId: userId)
     }
@@ -194,16 +195,10 @@ final class AuthManager: ObservableObject {
         current.append(phoneNumber)
 
         // Store as JSONB array in `profiles.saved_phone_numbers`.
-        let encoded = try JSONEncoder().encode(current)
-        let json = try JSONSerialization.jsonObject(with: encoded) as? [Any] ?? []
-
-        // Convert array elements to AnyJSON and then to proper types
-        let jsonArray = json.map { AnyJSON.any($0) }
-        var updateDict: [String: Any] = [:]
-        updateDict["saved_phone_numbers"] = jsonArray.map { $0.value }
+        let updateData = ProfileUpdate(savedPhoneNumbers: current)
         
         _ = try await client.from("profiles")
-            .update(updateDict)
+            .update(updateData)
             .eq("id", value: userId)
             .execute()
 
@@ -214,10 +209,14 @@ final class AuthManager: ObservableObject {
         guard let userId = currentUserId else { return }
 
         Task {
-            try? await updateProfileFields(userId: userId, fields: [
-                "is_online": .bool(isOnline),
-                "last_seen": .string(ISO8601DateFormatter().string(from: Date()))
-            ])
+            let update = ProfileUpdate(
+                isOnline: isOnline,
+                lastSeen: Date()
+            )
+            try? await client.from("profiles")
+                .update(update)
+                .eq("id", value: userId)
+                .execute()
         }
     }
 
@@ -240,9 +239,8 @@ final class AuthManager: ObservableObject {
 
     func refreshUserSession() async {
         do {
-            if let session = try await client.auth.session {
-                await fetchUserProfile(userId: session.user.id.uuidString)
-            }
+            let session = try await client.auth.session
+            await fetchUserProfile(userId: session.user.id.uuidString)
         } catch {
             // No session available or refresh failed.
             await MainActor.run {
@@ -304,23 +302,36 @@ final class AuthManager: ObservableObject {
     }
 
     private func upsertProfile(_ row: ProfileRow) async throws {
-        let data = try JSONEncoder().encode(row)
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-
         _ = try await client.from("profiles")
-            .upsert(json)
+            .upsert(row)
             .execute()
     }
 
     private func updateProfileFields(userId: String, fields: [String: AnyJSON]) async throws {
-        // Convert AnyJSON to their underlying values
-        var dict: [String: Any] = [:]
-        for (k, v) in fields {
-            dict[k] = v.value
+        // Convert AnyJSON to ProfileUpdate struct
+        var update = ProfileUpdate()
+        
+        for (key, value) in fields {
+            switch (key, value) {
+            case ("name", .string(let v)):
+                update.name = v
+            case ("phone", .string(let v)):
+                update.phone = v
+            case ("photo_url", .string(let v)):
+                update.photoURL = v
+            case ("is_online", .bool(let v)):
+                update.isOnline = v
+            case ("last_seen", .string(let v)):
+                if let date = ISO8601DateFormatter().date(from: v) {
+                    update.lastSeen = date
+                }
+            default:
+                break
+            }
         }
 
         _ = try await client.from("profiles")
-            .update(dict)
+            .update(update)
             .eq("id", value: userId)
             .execute()
     }
@@ -430,6 +441,33 @@ struct User: Identifiable, Codable {
 }
 
 // MARK: - Supabase Row + JSON Helpers
+
+private struct ProfileUpdate: Codable {
+    var name: String?
+    var phone: String?
+    var photoURL: String?
+    var isOnline: Bool?
+    var lastSeen: Date?
+    var savedPhoneNumbers: [SavedPhoneNumber]?
+    
+    enum CodingKeys: String, CodingKey {
+        case name
+        case phone
+        case photoURL = "photo_url"
+        case isOnline = "is_online"
+        case lastSeen = "last_seen"
+        case savedPhoneNumbers = "saved_phone_numbers"
+    }
+    
+    init(name: String? = nil, phone: String? = nil, photoURL: String? = nil, isOnline: Bool? = nil, lastSeen: Date? = nil, savedPhoneNumbers: [SavedPhoneNumber]? = nil) {
+        self.name = name
+        self.phone = phone
+        self.photoURL = photoURL
+        self.isOnline = isOnline
+        self.lastSeen = lastSeen
+        self.savedPhoneNumbers = savedPhoneNumbers
+    }
+}
 
 private struct ProfileRow: Codable {
     let id: String

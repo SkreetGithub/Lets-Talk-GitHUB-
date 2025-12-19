@@ -49,8 +49,10 @@ class WebRTCCallManager: NSObject, ObservableObject {
         audioSession = RTCAudioSession.sharedInstance()
         audioSession?.lockForConfiguration()
         do {
-            try audioSession?.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker])
-            try audioSession?.setActive(true)
+            if let session = audioSession?.session {
+                try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker])
+                try session.setActive(true)
+            }
         } catch {
             print("Error setting up audio session: \(error)")
         }
@@ -192,10 +194,12 @@ class WebRTCCallManager: NSObject, ObservableObject {
         
         audioSession?.lockForConfiguration()
         do {
-            if isSpeakerEnabled {
-                try audioSession?.overrideOutputAudioPort(.speaker)
-            } else {
-                try audioSession?.overrideOutputAudioPort(.none)
+            if let session = audioSession?.session {
+                if isSpeakerEnabled {
+                    try session.overrideOutputAudioPort(.speaker)
+                } else {
+                    try session.overrideOutputAudioPort(.none)
+                }
             }
         } catch {
             print("Error toggling speaker: \(error)")

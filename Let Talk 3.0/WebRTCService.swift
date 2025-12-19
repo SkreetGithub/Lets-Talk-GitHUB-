@@ -70,10 +70,10 @@ class WebRTCService: NSObject {
             guard let self = self else { return }
             self.audioSession?.lockForConfiguration()
             do {
-                try self.audioSession?.setCategory(.playAndRecord)
-                try self.audioSession?.setMode(.voiceChat)
-                try self.audioSession?.overrideOutputAudioPort(.speaker)
-                try self.audioSession?.setActive(true)
+                if let session = self.audioSession?.session {
+                    try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker])
+                    try session.setActive(true)
+                }
             } catch {
                 print("Error setting up audio session: \(error)")
             }
@@ -284,7 +284,7 @@ class WebRTCService: NSObject {
             isMultiCall = callParticipants.count > 1
             
             // Notify Firebase about participant addition
-            if let callId = currentCallId {
+            if currentCallId != nil {
                 Task {
                     // Add participant logic would go here
                     // This would require additional Firebase methods
@@ -299,7 +299,7 @@ class WebRTCService: NSObject {
         isMultiCall = callParticipants.count > 1
         
         // Notify Firebase about participant removal
-        if let callId = currentCallId {
+        if currentCallId != nil {
             Task {
                 // Remove participant logic would go here
                 // This would require additional Firebase methods

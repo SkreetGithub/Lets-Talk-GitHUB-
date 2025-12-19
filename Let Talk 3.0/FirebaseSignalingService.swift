@@ -64,13 +64,22 @@ final class FirebaseSignalingService: ObservableObject {
             participants: [currentUserId, targetUserId]
         )
 
-        // Convert dictionary to JSON-serializable format
-        let callDict = call.toDictionary()
-        let jsonData = try JSONSerialization.data(withJSONObject: callDict)
-        let jsonDict = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] ?? callDict
+        // Create encodable struct for insertion
+        let callInsert = CallInsert(
+            id: call.id,
+            callerId: call.callerId,
+            calleeId: call.calleeId,
+            isVideo: call.isVideo,
+            status: call.status.rawValue,
+            createdAt: ISO8601DateFormatter().string(from: call.createdAt),
+            participants: call.participants,
+            answeredAt: call.answeredAt.map { ISO8601DateFormatter().string(from: $0) },
+            endedAt: call.endedAt.map { ISO8601DateFormatter().string(from: $0) },
+            rejectedAt: call.rejectedAt.map { ISO8601DateFormatter().string(from: $0) }
+        )
         
         _ = try await client.from("calls")
-            .insert(jsonDict)
+            .insert(callInsert)
             .execute()
 
         listenForCallUpdates(callId: callId)
@@ -82,17 +91,15 @@ final class FirebaseSignalingService: ObservableObject {
             throw SignalingError.userNotAuthenticated
         }
 
-        // Ensure proper JSON serialization
-        let updateData: [String: Any] = [
-            "status": CallStatus.answered.rawValue,
-            "answered_at": ISO8601DateFormatter().string(from: Date()),
-            "is_video": isVideo
-        ]
-        let jsonData = try JSONSerialization.data(withJSONObject: updateData)
-        let jsonDict = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] ?? updateData
+        // Create encodable struct for update
+        let updateData = CallUpdate(
+            status: CallStatus.answered.rawValue,
+            answeredAt: ISO8601DateFormatter().string(from: Date()),
+            isVideo: isVideo
+        )
         
         _ = try await client.from("calls")
-            .update(jsonDict)
+            .update(updateData)
             .eq("id", value: callId)
             .execute()
 
@@ -100,11 +107,13 @@ final class FirebaseSignalingService: ObservableObject {
     }
 
     func endCall(callId: String) async throws {
+        let updateData = CallUpdate(
+            status: CallStatus.ended.rawValue,
+            endedAt: ISO8601DateFormatter().string(from: Date())
+        )
+        
         _ = try await client.from("calls")
-            .update([
-                "status": CallStatus.ended.rawValue,
-                "ended_at": ISO8601DateFormatter().string(from: Date())
-            ])
+            .update(updateData)
             .eq("id", value: callId)
             .execute()
 
@@ -112,11 +121,13 @@ final class FirebaseSignalingService: ObservableObject {
     }
 
     func rejectCall(callId: String) async throws {
+        let updateData = CallUpdate(
+            status: CallStatus.rejected.rawValue,
+            rejectedAt: ISO8601DateFormatter().string(from: Date())
+        )
+        
         _ = try await client.from("calls")
-            .update([
-                "status": CallStatus.rejected.rawValue,
-                "rejected_at": ISO8601DateFormatter().string(from: Date())
-            ])
+            .update(updateData)
             .eq("id", value: callId)
             .execute()
 
@@ -134,16 +145,16 @@ final class FirebaseSignalingService: ObservableObject {
     }
 
     func sendIceCandidate(callId: String, candidate: RTCIceCandidate) async throws {
-        let row: [String: Any] = [
-            "id": UUID().uuidString,
-            "call_id": callId,
-            "type": SignalingMessageType.iceCandidate.rawValue,
-            "sender_id": AuthManager.shared.currentUserId ?? "",
-            "candidate": candidate.sdp,
-            "sdp_mline_index": candidate.sdpMLineIndex,
-            "sdp_mid": candidate.sdpMid ?? "",
-            "timestamp": ISO8601DateFormatter().string(from: Date())
-        ]
+        let row = SignalInsert(
+            id: UUID().uuidString,
+            callId: callId,
+            type: SignalingMessageType.iceCandidate.rawValue,
+            senderId: AuthManager.shared.currentUserId ?? "",
+            candidate: candidate.sdp,
+            sdpMLineIndex: candidate.sdpMLineIndex,
+            sdpMid: candidate.sdpMid ?? "",
+            timestamp: ISO8601DateFormatter().string(from: Date())
+        )
 
         _ = try await client.from("call_signals")
             .insert(row)
@@ -151,14 +162,14 @@ final class FirebaseSignalingService: ObservableObject {
     }
 
     private func insertSignal(callId: String, type: SignalingMessageType, sdp: String) async throws {
-        let row: [String: Any] = [
-            "id": UUID().uuidString,
-            "call_id": callId,
-            "type": type.rawValue,
-            "sender_id": AuthManager.shared.currentUserId ?? "",
-            "sdp": sdp,
-            "timestamp": ISO8601DateFormatter().string(from: Date())
-        ]
+        let row = SignalInsert(
+            id: UUID().uuidString,
+            callId: callId,
+            type: type.rawValue,
+            senderId: AuthManager.shared.currentUserId ?? "",
+            sdp: sdp,
+            timestamp: ISO8601DateFormatter().string(from: Date())
+        )
 
         _ = try await client.from("call_signals")
             .insert(row)
@@ -386,6 +397,94 @@ enum SignalingError: Error, LocalizedError {
         case .invalidSignalingData: return "Invalid signaling data"
         case .networkError: return "Network error occurred"
         }
+    }
+}
+
+// MARK: - Supabase Insert/Update Structs
+
+private struct CallInsert: Codable {
+    let id: String
+    let callerId: String
+    let calleeId: String
+    let isVideo: Bool
+    let status: String
+    let createdAt: String
+    let participants: [String]
+    let answeredAt: String?
+    let endedAt: String?
+    let rejectedAt: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case callerId = "caller_id"
+        case calleeId = "callee_id"
+        case isVideo = "is_video"
+        case status
+        case createdAt = "created_at"
+        case participants
+        case answeredAt = "answered_at"
+        case endedAt = "ended_at"
+        case rejectedAt = "rejected_at"
+    }
+}
+
+private struct CallUpdate: Codable {
+    let status: String?
+    let answeredAt: String?
+    let endedAt: String?
+    let rejectedAt: String?
+    let isVideo: Bool?
+    
+    enum CodingKeys: String, CodingKey {
+        case status
+        case answeredAt = "answered_at"
+        case endedAt = "ended_at"
+        case rejectedAt = "rejected_at"
+        case isVideo = "is_video"
+    }
+    
+    init(status: String? = nil, answeredAt: String? = nil, endedAt: String? = nil, rejectedAt: String? = nil, isVideo: Bool? = nil) {
+        self.status = status
+        self.answeredAt = answeredAt
+        self.endedAt = endedAt
+        self.rejectedAt = rejectedAt
+        self.isVideo = isVideo
+    }
+}
+
+private struct SignalInsert: Codable {
+    let id: String
+    let callId: String
+    let type: String
+    let senderId: String
+    let sdp: String?
+    let candidate: String?
+    let sdpMLineIndex: Int32?
+    let sdpMid: String?
+    let timestamp: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case callId = "call_id"
+        case type
+        case senderId = "sender_id"
+        case sdp
+        case candidate
+        case sdpMLineIndex = "sdp_mline_index"
+        case sdpMid = "sdp_mid"
+        case timestamp
+    }
+    
+    init(id: String, callId: String, type: String, senderId: String, sdp: String? = nil, candidate: String? = nil, sdpMLineIndex: Int32? = nil, sdpMid: String? = nil, timestamp: String) {
+        self.id = id
+        self.callId = callId
+        self.type = type
+        self.senderId = senderId
+        self.sdp = sdp
+        self.candidate = candidate
+        self.sdpMLineIndex = sdpMLineIndex
+        self.sdpMid = sdpMid
+        self.timestamp = timestamp
     }
 }
 

@@ -169,38 +169,42 @@ struct AppStatusView: View {
             }
             
             // Status Details
-            if showDetails {
-                VStack(alignment: .leading, spacing: 10) {
-                    StatusRow(title: "Network", status: statusChecker.networkStatus)
-                    StatusRow(title: "Backend", status: statusChecker.firebaseStatus)
-                    StatusRow(title: "Biometric", status: statusChecker.biometricStatus)
-                    StatusRow(title: "Storage", status: statusChecker.storageStatus)
-                    StatusRow(title: "Demo Data", status: statusChecker.hasDemoData ? "Present" : "Clean")
+            Group {
+                if showDetails {
+                    VStack(alignment: .leading, spacing: 10) {
+                        StatusRow(title: "Network", status: statusChecker.networkStatus)
+                        StatusRow(title: "Backend", status: statusChecker.firebaseStatus)
+                        StatusRow(title: "Biometric", status: statusChecker.biometricStatus)
+                        StatusRow(title: "Storage", status: statusChecker.storageStatus)
+                        StatusRow(title: "Demo Data", status: statusChecker.hasDemoData ? "Present" : "Clean")
+                    }
+                    .padding()
+                    .background(Color.gray.opacity(0.1))
+                    .cornerRadius(10)
                 }
-                .padding()
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(10)
             }
             
             // Issues List
-            if !statusChecker.issues.isEmpty {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Issues:")
-                        .font(.headline)
-                        .foregroundColor(.red)
-                    
-                    ForEach(statusChecker.issues, id: \.self) { issue in
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.red)
-                            Text(issue)
-                                .font(.caption)
+            Group {
+                if !statusChecker.issues.isEmpty {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Issues:")
+                            .font(.headline)
+                            .foregroundColor(.red)
+                        
+                        ForEach(statusChecker.issues, id: \.self) { issue in
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.red)
+                                Text(issue)
+                                    .font(.caption)
+                            }
                         }
                     }
+                    .padding()
+                    .background(Color.red.opacity(0.1))
+                    .cornerRadius(10)
                 }
-                .padding()
-                .background(Color.red.opacity(0.1))
-                .cornerRadius(10)
             }
             
             // Toggle Details Button

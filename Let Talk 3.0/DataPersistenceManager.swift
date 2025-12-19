@@ -360,6 +360,130 @@ final class DataPersistenceManager: ObservableObject {
         _ = getCachedCalls()
         _ = getCachedTranslations()
     }
+    
+    func getCacheSize() -> String {
+        var totalSize: Int64 = 0
+        
+        // Calculate size of contacts cache
+        if let contactsData = userDefaults.data(forKey: CacheKeys.contacts) {
+            totalSize += Int64(contactsData.count)
+        }
+        
+        // Calculate size of calls cache
+        if let callsData = userDefaults.data(forKey: CacheKeys.calls) {
+            totalSize += Int64(callsData.count)
+        }
+        
+        // Calculate size of translations cache
+        if let translationsData = userDefaults.data(forKey: CacheKeys.translations) {
+            totalSize += Int64(translationsData.count)
+        }
+        
+        // Calculate size of messages cache (check all message keys)
+        let messageKeys = userDefaults.dictionaryRepresentation().keys.filter { $0.hasPrefix(CacheKeys.messages) }
+        for key in messageKeys {
+            if let messageData = userDefaults.data(forKey: key) {
+                totalSize += Int64(messageData.count)
+            }
+        }
+        
+        // Format the size
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: totalSize)
+    }
+
+    // MARK: - Data Export/Import
+    
+    func exportUserData() -> Data? {
+        var exportData: [String: Any] = [:]
+        
+        // Export contacts
+        if let contactsData = userDefaults.data(forKey: CacheKeys.contacts) {
+            exportData["contacts"] = contactsData
+        }
+        
+        // Export calls
+        if let callsData = userDefaults.data(forKey: CacheKeys.calls) {
+            exportData["calls"] = callsData
+        }
+        
+        // Export translations
+        if let translationsData = userDefaults.data(forKey: CacheKeys.translations) {
+            exportData["translations"] = translationsData
+        }
+        
+        // Export messages (all message keys)
+        var messages: [String: Data] = [:]
+        let messageKeys = userDefaults.dictionaryRepresentation().keys.filter { $0.hasPrefix(CacheKeys.messages) }
+        for key in messageKeys {
+            if let messageData = userDefaults.data(forKey: key) {
+                messages[key] = messageData
+            }
+        }
+        if !messages.isEmpty {
+            exportData["messages"] = messages
+        }
+        
+        // Export metadata
+        exportData["lastSyncTime"] = lastSyncTime
+        exportData["isOfflineMode"] = isOfflineMode
+        
+        // Encode to JSON
+        do {
+            return try JSONSerialization.data(withJSONObject: exportData, options: .prettyPrinted)
+        } catch {
+            print("❌ Failed to export user data: \(error)")
+            return nil
+        }
+    }
+    
+    func importUserData(_ data: Data) -> Bool {
+        do {
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return false
+            }
+            
+            // Import contacts
+            if let contactsData = json["contacts"] as? Data {
+                userDefaults.set(contactsData, forKey: CacheKeys.contacts)
+            }
+            
+            // Import calls
+            if let callsData = json["calls"] as? Data {
+                userDefaults.set(callsData, forKey: CacheKeys.calls)
+            }
+            
+            // Import translations
+            if let translationsData = json["translations"] as? Data {
+                userDefaults.set(translationsData, forKey: CacheKeys.translations)
+            }
+            
+            // Import messages
+            if let messagesDict = json["messages"] as? [String: Data] {
+                for (key, messageData) in messagesDict {
+                    userDefaults.set(messageData, forKey: key)
+                }
+            }
+            
+            // Import metadata
+            if let syncTime = json["lastSyncTime"] as? Date {
+                lastSyncTime = syncTime
+                saveLastSyncTime()
+            }
+            
+            if let offlineMode = json["isOfflineMode"] as? Bool {
+                isOfflineMode = offlineMode
+                saveOfflineMode(offlineMode)
+            }
+            
+            return true
+        } catch {
+            print("❌ Failed to import user data: \(error)")
+            return false
+        }
+    }
 
     // MARK: - Background Sync
 

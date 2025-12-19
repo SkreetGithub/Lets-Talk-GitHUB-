@@ -25,31 +25,34 @@ final class DatabaseManager: ObservableObject {
 
         let chatId = getChatId(senderId: message.senderId, receiverId: message.receiverId)
 
-        var row: [String: Any] = [
-            "id": message.id,
-            "chat_id": chatId,
-            "sender_id": message.senderId,
-            "receiver_id": message.receiverId,
-            "content": message.content,
-            "timestamp": ISO8601DateFormatter().string(from: message.timestamp),
-            "type": message.type.rawValue,
-            "status": message.status.rawValue,
-            "is_encrypted": message.isEncrypted
-        ]
-
-        if let translation = message.translation {
-            row["translation"] = translation
-        }
-
+        var attachmentsJSON: String? = nil
         if let attachments = message.attachments,
            let encoded = try? JSONEncoder().encode(attachments),
-           let json = try? JSONSerialization.jsonObject(with: encoded) {
-            row["attachments"] = json
+           let jsonString = String(data: encoded, encoding: .utf8) {
+            attachmentsJSON = jsonString
         }
-
-        if let metadata = message.metadata {
-            row["metadata"] = metadata
+        
+        var metadataJSON: String? = nil
+        if let metadata = message.metadata,
+           let encoded = try? JSONEncoder().encode(metadata),
+           let jsonString = String(data: encoded, encoding: .utf8) {
+            metadataJSON = jsonString
         }
+        
+        let row = MessageInsert(
+            id: message.id,
+            chatId: chatId,
+            senderId: message.senderId,
+            receiverId: message.receiverId,
+            content: message.content,
+            timestamp: ISO8601DateFormatter().string(from: message.timestamp),
+            type: message.type.rawValue,
+            status: message.status.rawValue,
+            isEncrypted: message.isEncrypted,
+            translation: message.translation,
+            attachments: attachmentsJSON,
+            metadata: metadataJSON
+        )
 
         _ = try await client.from("messages")
             .insert(row)
@@ -106,11 +109,11 @@ final class DatabaseManager: ObservableObject {
 
         let chatId = getChatId(senderId: senderId, receiverId: receiverId)
 
-        let row: [String: Any] = [
-            "id": chatId,
-            "participants": [senderId, receiverId],
-            "last_updated": ISO8601DateFormatter().string(from: Date())
-        ]
+        let row = ChatInsert(
+            id: chatId,
+            participants: [senderId, receiverId],
+            lastUpdated: ISO8601DateFormatter().string(from: Date())
+        )
 
         _ = try await client.from("chats")
             .upsert(row)
@@ -206,14 +209,14 @@ final class DatabaseManager: ObservableObject {
             throw NSError(domain: "DatabaseManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
 
-        let row: [String: Any] = [
-            "id": UUID().uuidString,
-            "owner_id": userId,
-            "name": name,
-            "phone": phone,
-            "email": email,
-            "created_at": ISO8601DateFormatter().string(from: Date())
-        ]
+        let row = ContactInsert(
+            id: UUID().uuidString,
+            ownerId: userId,
+            name: name,
+            phone: phone,
+            email: email,
+            createdAt: ISO8601DateFormatter().string(from: Date())
+        )
 
         _ = try await client.from("contacts")
             .insert(row)
@@ -304,29 +307,111 @@ final class DatabaseManager: ObservableObject {
     }
 
     private func updateLastMessage(chatId: String, message: Message) async throws {
-        // Convert to JSON-serializable types
-        let lastMessage: [String: Any] = [
-            "content": message.content,
-            "sender_id": message.senderId,
-            "timestamp": ISO8601DateFormatter().string(from: message.timestamp),
-            "type": message.type.rawValue,
-            "is_read": message.status == .read
-        ]
-
-        // Encode and decode to ensure proper types
-        let jsonData = try JSONSerialization.data(withJSONObject: [
-            "last_message": lastMessage,
-            "last_updated": ISO8601DateFormatter().string(from: Date())
-        ])
-        let updateDict = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] ?? [
-            "last_message": lastMessage,
-            "last_updated": ISO8601DateFormatter().string(from: Date())
-        ]
+        let lastMessage = ChatLastMessageUpdate(
+            content: message.content,
+            senderId: message.senderId,
+            timestamp: ISO8601DateFormatter().string(from: message.timestamp),
+            type: message.type.rawValue,
+            isRead: message.status == .read
+        )
+        
+        let updateData = ChatUpdate(
+            lastMessage: lastMessage,
+            lastUpdated: ISO8601DateFormatter().string(from: Date())
+        )
 
         _ = try await client.from("chats")
-            .update(updateDict)
+            .update(updateData)
             .eq("id", value: chatId)
             .execute()
+    }
+}
+
+// MARK: - Supabase Insert/Update Structs
+
+private struct MessageInsert: Codable {
+    let id: String
+    let chatId: String
+    let senderId: String
+    let receiverId: String
+    let content: String
+    let timestamp: String
+    let type: String
+    let status: String
+    let isEncrypted: Bool
+    let translation: String?
+    let attachments: String?
+    let metadata: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case chatId = "chat_id"
+        case senderId = "sender_id"
+        case receiverId = "receiver_id"
+        case content
+        case timestamp
+        case type
+        case status
+        case isEncrypted = "is_encrypted"
+        case translation
+        case attachments
+        case metadata
+    }
+}
+
+private struct ChatInsert: Codable {
+    let id: String
+    let participants: [String]
+    let lastUpdated: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case participants
+        case lastUpdated = "last_updated"
+    }
+}
+
+private struct ChatUpdate: Codable {
+    let lastMessage: ChatLastMessageUpdate?
+    let lastUpdated: String
+    
+    enum CodingKeys: String, CodingKey {
+        case lastMessage = "last_message"
+        case lastUpdated = "last_updated"
+    }
+}
+
+private struct ChatLastMessageUpdate: Codable {
+    let content: String
+    let senderId: String
+    let timestamp: String
+    let type: String
+    let isRead: Bool
+    
+    enum CodingKeys: String, CodingKey {
+        case content
+        case senderId = "sender_id"
+        case timestamp
+        case type
+        case isRead = "is_read"
+    }
+}
+
+private struct ContactInsert: Codable {
+    let id: String
+    let ownerId: String
+    let name: String
+    let phone: String
+    let email: String
+    let createdAt: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case ownerId = "owner_id"
+        case name
+        case phone
+        case email
+        case createdAt = "created_at"
     }
 }
 
@@ -357,6 +442,35 @@ private struct MessageRow: Codable {
         case translation
         case attachments
         case metadata
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        senderId = try container.decode(String.self, forKey: .senderId)
+        receiverId = try container.decode(String.self, forKey: .receiverId)
+        content = try container.decode(String.self, forKey: .content)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        type = try container.decode(String.self, forKey: .type)
+        status = try container.decode(String.self, forKey: .status)
+        isEncrypted = try container.decode(Bool.self, forKey: .isEncrypted)
+        translation = try container.decodeIfPresent(String.self, forKey: .translation)
+        
+        // Decode attachments from JSON string if present
+        if let attachmentsString = try? container.decodeIfPresent(String.self, forKey: .attachments),
+           let data = attachmentsString.data(using: .utf8) {
+            attachments = try? JSONDecoder().decode([Message.Attachment].self, from: data)
+        } else {
+            attachments = try? container.decodeIfPresent([Message.Attachment].self, forKey: .attachments)
+        }
+        
+        // Decode metadata from JSON string if present
+        if let metadataString = try? container.decodeIfPresent(String.self, forKey: .metadata),
+           let data = metadataString.data(using: .utf8) {
+            metadata = try? JSONDecoder().decode([String: String].self, from: data)
+        } else {
+            metadata = try? container.decodeIfPresent([String: String].self, forKey: .metadata)
+        }
     }
 
     var asMessage: Message {

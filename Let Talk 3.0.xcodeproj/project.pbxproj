@@ -104,19 +104,29 @@
 			);
 			mainGroup = F2A3F5002EF47A6A00FBF7D7;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				F2A3F50F2EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+				F2A3F5112EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "WebRTC" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F2A3F50A2EF47A6B00FBF7D7 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			packageReferences = (
-				F2A3F50F2EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "supabase-swift" */,
-				F2A3F5112EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "webrtc-ios" */,
-			);
 			targets = (
 				F2A3F5082EF47A6B00FBF7D7 /* Let Talk 3.0 */,
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		F2A3F5072EF47A6B00FBF7D7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
 		F2A3F50D2EF47A6B00FBF7D7 /* Exclude Info.plist from Resources */ = {
@@ -139,16 +149,6 @@
 			shellScript = "# This script ensures Info.plist is NOT in Copy Bundle Resources\n# Info.plist should only be processed via INFOPLIST_FILE build setting\necho \"Checking Info.plist configuration...\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
-
-/* Begin PBXResourcesBuildPhase section */
-		F2A3F5072EF47A6B00FBF7D7 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		F2A3F5052EF47A6B00FBF7D7 /* Sources */ = {
@@ -285,12 +285,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Let Talk 3.0/Let Talk 3.0.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Let Talk 3.0/Preview Content\"";
-				DEVELOPMENT_TEAM = KG57V7AK94;
+				DEVELOPMENT_TEAM = 976FG4J66Z;
 				ENABLE_PREVIEWS = YES;
-				EXCLUDED_SOURCE_FILE_NAMES = "Info.plist";
+				EXCLUDED_SOURCE_FILE_NAMES = Info.plist;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Let Talk 3.0/Info.plist";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -303,7 +304,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "swift.ui.Let-Talk-3-0";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.waliexchange.letalk3";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -316,12 +317,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Let Talk 3.0/Let Talk 3.0.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Let Talk 3.0/Preview Content\"";
-				DEVELOPMENT_TEAM = KG57V7AK94;
+				DEVELOPMENT_TEAM = 976FG4J66Z;
 				ENABLE_PREVIEWS = YES;
-				EXCLUDED_SOURCE_FILE_NAMES = "Info.plist";
+				EXCLUDED_SOURCE_FILE_NAMES = Info.plist;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Let Talk 3.0/Info.plist";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -334,7 +336,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "swift.ui.Let-Talk-3-0";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.waliexchange.letalk3";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -374,7 +376,7 @@
 				minimumVersion = 2.0.0;
 			};
 		};
-		F2A3F5112EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "webrtc-ios" */ = {
+		F2A3F5112EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "WebRTC" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/stasel/WebRTC";
 			requirement = {
@@ -392,7 +394,7 @@
 		};
 		F2A3F5102EF47A6B00FBF7D7 /* WebRTC */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = F2A3F5112EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "webrtc-ios" */;
+			package = F2A3F5112EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "WebRTC" */;
 			productName = WebRTC;
 		};
 /* End XCSwiftPackageProductDependency section */

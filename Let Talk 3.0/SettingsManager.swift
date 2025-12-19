@@ -75,11 +75,9 @@ final class SettingsManager: ObservableObject {
         guard let userId = AuthManager.shared.currentUserId else { return }
 
         do {
-            let encoded = try JSONEncoder().encode(settings)
-            let json = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] ?? [:]
-
+            // AppSettings is Codable, so we can use it directly
             _ = try await client.from("profiles")
-                .update(["settings": json])
+                .update(["settings": settings])
                 .eq("id", value: userId)
                 .execute()
         } catch {

@@ -138,8 +138,8 @@ struct OfflineSettingsView: View {
                         
                         Toggle("", isOn: Binding(
                             get: { dataPersistence.isOfflineMode },
-                            set: { isOn in
-                                if isOn {
+                            set: { newValue in
+                                if newValue {
                                     dataPersistence.enableOfflineMode()
                                 } else {
                                     dataPersistence.disableOfflineMode()
@@ -307,7 +307,3 @@ struct DocumentPicker: UIViewControllerRepresentable {
     }
 }
 
-#Preview {
-    OfflineSettingsView()
-        .environmentObject(DataPersistenceManager.shared)
-}
