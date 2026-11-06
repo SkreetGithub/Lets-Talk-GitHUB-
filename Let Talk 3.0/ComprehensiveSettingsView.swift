@@ -37,6 +37,7 @@ struct ComprehensiveSettingsView: View {
                 dataManagementSection
                 
                 // Account Section
+                legalSection
                 accountSection
             }
             .navigationTitle("Settings")
@@ -517,6 +518,17 @@ struct ComprehensiveSettingsView: View {
         }
     }
     
+    // MARK: - Legal Section
+    private var legalSection: some View {
+        Section {
+            Link("Privacy Policy", destination: LegalURLs.privacy)
+            Link("Terms of Service", destination: LegalURLs.terms)
+            Link("Support", destination: LegalURLs.support)
+        } header: {
+            Text("Legal")
+        }
+    }
+
     // MARK: - Account Section
     private var accountSection: some View {
         Section {

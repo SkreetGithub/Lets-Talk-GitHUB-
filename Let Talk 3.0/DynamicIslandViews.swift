@@ -3,7 +3,6 @@ import Foundation
 
 struct DynamicIslandViews: View {
     @StateObject private var notificationManager = NotificationManager.shared
-    private let webRTCService = WebRTCService()
     
     var body: some View {
         ZStack {
@@ -22,10 +21,17 @@ struct DynamicIslandViews: View {
                     isVideoCall: call.isVideoCall,
                     callerImage: call.callerImage,
                     onAccept: {
-                        // webRTCService.acceptCall() // TODO: Implement acceptCall method
+                        IncomingCallManager.shared.answerIncomingCall()
+                        if let incoming = IncomingCallManager.shared.currentIncomingCall {
+                            Task {
+                                try? await WebRTCCallManager.shared.answerCall(callId: incoming.id, isVideo: incoming.isVideo)
+                            }
+                        }
+                        notificationManager.currentCall = nil
                     },
                     onDecline: {
-                        // webRTCService.rejectCall() // TODO: Implement rejectCall method
+                        IncomingCallManager.shared.rejectIncomingCall()
+                        notificationManager.currentCall = nil
                     }
                 )
                 .transition(.move(edge: .top).combined(with: .opacity))

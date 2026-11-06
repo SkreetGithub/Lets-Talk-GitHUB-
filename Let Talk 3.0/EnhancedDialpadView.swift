@@ -311,7 +311,7 @@ struct EnhancedDialpadView: View {
                 }
             } catch {
                 await MainActor.run {
-                    print("Failed to start call: \(error)")
+                    debugLog("Failed to start call: \(error)")
                     // Show error alert
                     showInvalidNumberAlert = true
                 }

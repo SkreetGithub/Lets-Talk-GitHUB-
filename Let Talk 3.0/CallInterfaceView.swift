@@ -13,6 +13,7 @@ struct CallInterfaceView: View {
     @State private var controlsTimer: Timer?
     @State private var callDuration: TimeInterval = 0
     @State private var callTimer: Timer?
+    @StateObject private var liveTranslation = LiveTranslationSession.shared
     
     let call: Call
     let isIncoming: Bool
@@ -27,6 +28,9 @@ struct CallInterfaceView: View {
             
             // Call Info Overlay
             callInfoOverlay
+
+            // Live translation subtitles
+            SubtitleOverlay(session: liveTranslation)
             
             // Controls Overlay
             if showControls {
@@ -43,6 +47,14 @@ struct CallInterfaceView: View {
         }
         .onDisappear {
             stopTimers()
+            liveTranslation.stop()
+        }
+        .onChange(of: callManager.callStatus) { _, status in
+            if status == .connected {
+                liveTranslation.start()
+            } else if status == .ending || status == .idle {
+                liveTranslation.stop()
+            }
         }
         .onTapGesture {
             toggleControls()
@@ -103,8 +115,11 @@ struct CallInterfaceView: View {
                 
                 Spacer()
                 
-                // Connection status indicator
-                connectionStatusIndicator
+                VStack(alignment: .trailing, spacing: 8) {
+                    // Connection status indicator
+                    connectionStatusIndicator
+                    LiveTranslationChip(session: liveTranslation)
+                }
             }
             .padding(.horizontal, 20)
             .padding(.top, 60)

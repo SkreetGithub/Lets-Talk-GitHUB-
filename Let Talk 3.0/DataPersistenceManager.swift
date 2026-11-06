@@ -163,7 +163,7 @@ final class DataPersistenceManager: ObservableObject {
             let data = try JSONEncoder().encode(cached)
             userDefaults.set(data, forKey: CacheKeys.contacts)
         } catch {
-            print("❌ Failed to cache contacts: \(error)")
+            debugLog("❌ Failed to cache contacts: \(error)")
         }
     }
 
@@ -180,7 +180,7 @@ final class DataPersistenceManager: ObservableObject {
 
             return valid.map { $0.toContact() }
         } catch {
-            print("❌ Failed to load cached contacts: \(error)")
+            debugLog("❌ Failed to load cached contacts: \(error)")
             return []
         }
     }
@@ -193,7 +193,7 @@ final class DataPersistenceManager: ObservableObject {
             let data = try JSONEncoder().encode(cached)
             userDefaults.set(data, forKey: "\(CacheKeys.messages)_\(contactId)")
         } catch {
-            print("❌ Failed to cache messages: \(error)")
+            debugLog("❌ Failed to cache messages: \(error)")
         }
     }
 
@@ -211,7 +211,7 @@ final class DataPersistenceManager: ObservableObject {
 
             return valid.map { $0.toMessage() }
         } catch {
-            print("❌ Failed to load cached messages: \(error)")
+            debugLog("❌ Failed to load cached messages: \(error)")
             return []
         }
     }
@@ -230,7 +230,7 @@ final class DataPersistenceManager: ObservableObject {
             let data = try JSONEncoder().encode(cachedCalls)
             userDefaults.set(data, forKey: CacheKeys.calls)
         } catch {
-            print("❌ Failed to cache call: \(error)")
+            debugLog("❌ Failed to cache call: \(error)")
         }
     }
 
@@ -248,7 +248,7 @@ final class DataPersistenceManager: ObservableObject {
 
             return valid.sorted { $0.startTime > $1.startTime }
         } catch {
-            print("❌ Failed to load cached calls: \(error)")
+            debugLog("❌ Failed to load cached calls: \(error)")
             return []
         }
     }
@@ -267,7 +267,7 @@ final class DataPersistenceManager: ObservableObject {
             let data = try JSONEncoder().encode(cached)
             userDefaults.set(data, forKey: CacheKeys.translations)
         } catch {
-            print("❌ Failed to cache translation: \(error)")
+            debugLog("❌ Failed to cache translation: \(error)")
         }
     }
 
@@ -285,7 +285,7 @@ final class DataPersistenceManager: ObservableObject {
 
             return valid.sorted { $0.timestamp > $1.timestamp }
         } catch {
-            print("❌ Failed to load cached translations: \(error)")
+            debugLog("❌ Failed to load cached translations: \(error)")
             return []
         }
     }
@@ -312,7 +312,7 @@ final class DataPersistenceManager: ObservableObject {
             lastSyncTime = Date()
             saveLastSyncTime()
         } catch {
-            print("❌ Sync failed: \(error)")
+            debugLog("❌ Sync failed: \(error)")
         }
     }
 
@@ -434,7 +434,7 @@ final class DataPersistenceManager: ObservableObject {
         do {
             return try JSONSerialization.data(withJSONObject: exportData, options: .prettyPrinted)
         } catch {
-            print("❌ Failed to export user data: \(error)")
+            debugLog("❌ Failed to export user data: \(error)")
             return nil
         }
     }
@@ -480,7 +480,7 @@ final class DataPersistenceManager: ObservableObject {
             
             return true
         } catch {
-            print("❌ Failed to import user data: \(error)")
+            debugLog("❌ Failed to import user data: \(error)")
             return false
         }
     }

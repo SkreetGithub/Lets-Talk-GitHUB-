@@ -162,6 +162,14 @@ struct EnhancedAuthView: View {
                                 .font(.system(size: 16))
                                 .foregroundColor(.white.opacity(0.8))
                         }
+
+                        VStack(spacing: 4) {
+                            Text("By continuing you agree to our")
+                                .font(.footnote)
+                                .foregroundColor(.white.opacity(0.7))
+                            LegalLinksView()
+                                .tint(.white)
+                        }
                     }
                     .padding(.horizontal, 30)
                     

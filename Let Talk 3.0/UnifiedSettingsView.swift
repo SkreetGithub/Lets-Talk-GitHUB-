@@ -49,6 +49,7 @@ struct UnifiedSettingsView: View {
                 dataManagementSection
                 
                 // Account Section
+                legalSection
                 accountSection
             }
             .navigationTitle("Settings")
@@ -464,6 +465,16 @@ struct UnifiedSettingsView: View {
     }
     
     // MARK: - Account Section
+    private var legalSection: some View {
+        Section {
+            Link("Privacy Policy", destination: LegalURLs.privacy)
+            Link("Terms of Service", destination: LegalURLs.terms)
+            Link("Support", destination: LegalURLs.support)
+        } header: {
+            Text("Legal")
+        }
+    }
+
     private var accountSection: some View {
         Section {
             Button(action: { showResetPasswordAlert = true }) {
@@ -1002,7 +1013,7 @@ struct ExportSettingsView: View {
             exportData = jsonData
             showShareSheet = true
         } catch {
-            print("Export failed: \(error)")
+            debugLog("Export failed: \(error)")
         }
         
         isExporting = false
@@ -1070,11 +1081,11 @@ struct ImportSettingsView: View {
                 for translationData in translations {
                     // Create translation object from imported data
                     // This would need to be implemented based on your translation model
-                    print("Importing translation: \(translationData)")
+                    debugLog("Importing translation: \(translationData)")
                 }
             }
         } catch {
-            print("Import failed: \(error)")
+            debugLog("Import failed: \(error)")
         }
         
         isImporting = false

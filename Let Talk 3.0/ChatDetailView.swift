@@ -161,6 +161,9 @@ struct ChatHeader: View {
                 Image(systemName: "video")
                     .font(.system(size: 20))
             }
+
+            UserSafetyMenu(userId: contact.id, userName: contact.name)
+                .font(.system(size: 20))
         }
         .padding()
         .background(Color(.systemBackground))

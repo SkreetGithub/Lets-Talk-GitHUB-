@@ -147,7 +147,7 @@ final class MessageManager: ObservableObject {
         do {
             try await DatabaseManager.shared.markMessagesAsRead([messageId])
         } catch {
-            print("Error marking message as read: \(error)")
+            debugLog("Error marking message as read: \(error)")
         }
     }
 
@@ -161,7 +161,7 @@ final class MessageManager: ObservableObject {
         do {
             try await DatabaseManager.shared.markMessagesAsRead(unreadMessages.map { $0.id })
         } catch {
-            print("Error marking messages as read: \(error)")
+            debugLog("Error marking messages as read: \(error)")
         }
     }
 

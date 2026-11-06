@@ -102,16 +102,16 @@ class ChatDetailViewModel: ObservableObject {
         guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         
         guard let currentUserId = AuthManager.shared.currentUserId, !currentUserId.isEmpty else {
-            print("Error: User not authenticated")
+            debugLog("Error: User not authenticated")
             return
         }
         
         guard !contact.id.isEmpty else {
-            print("Error: Contact ID is empty")
+            debugLog("Error: Contact ID is empty")
             return
         }
         
-        print("Sending message from \(currentUserId) to \(contact.id): \(messageText)")
+        debugLog("Sending message from \(currentUserId) to \(contact.id): \(messageText)")
         
         let message = Message(
             senderId: currentUserId,

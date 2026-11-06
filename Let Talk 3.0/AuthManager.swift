@@ -44,7 +44,7 @@ final class AuthManager: ObservableObject {
                 }
 
                 if let session = session {
-                    await fetchUserProfile(userId: session.user.id.uuidString)
+                    await fetchUserProfile(userId: session.user.id.uuidString.lowercased())
                 } else {
                     await MainActor.run {
                         self.currentUser = nil
@@ -65,7 +65,7 @@ final class AuthManager: ObservableObject {
 
         do {
             let session = try await client.auth.signIn(email: email, password: password)
-            await fetchUserProfile(userId: session.user.id.uuidString)
+            await fetchUserProfile(userId: session.user.id.uuidString.lowercased())
         } catch {
             await MainActor.run { self.error = error }
             throw error
@@ -82,7 +82,7 @@ final class AuthManager: ObservableObject {
 
             // If email confirmation is enabled, Supabase may return no session.
             if let session = response.session {
-                let userId = session.user.id.uuidString
+                let userId = session.user.id.uuidString.lowercased()
                 try await upsertProfile(ProfileRow(
                     id: userId,
                     email: email,
@@ -128,7 +128,7 @@ final class AuthManager: ObservableObject {
             let session = try await client.auth.signInWithIdToken(
                 credentials: OpenIDConnectCredentials(provider: .apple, idToken: idToken, nonce: rawNonce)
             )
-            let userId = session.user.id.uuidString
+            let userId = session.user.id.uuidString.lowercased()
             await fetchUserProfile(userId: userId)
 
             // Apple only sends the name on the first sign-in; keep it if we have it.
@@ -257,16 +257,16 @@ final class AuthManager: ObservableObject {
     // MARK: - Account Management
 
     func deleteAccount() async throws {
-        // Client-side deletion of the auth user requires a service role key (server-side).
-        // Here we delete the profile row and sign out.
-        guard let userId = currentUserId else { return }
-
-        _ = try await client.from("profiles")
-            .delete()
-            .eq("id", value: userId)
-            .execute()
-
-        try await signOut()
+        // Server-side deletion (Edge Function `delete-account`, service role) removes the auth user
+        // and all of the user's data: messages, calls, contacts, blocks, tokens, storage, profile.
+        guard currentUserId != nil else { return }
+        try await Backend.deleteAccount()
+        try? await signOut()
+        await MainActor.run {
+            self.currentUser = nil
+            self.isAuthenticated = false
+            self.needsPhoneVerification = false
+        }
     }
 
     // MARK: - Session
@@ -274,7 +274,7 @@ final class AuthManager: ObservableObject {
     func refreshUserSession() async {
         do {
             let session = try await client.auth.session
-            await fetchUserProfile(userId: session.user.id.uuidString)
+            await fetchUserProfile(userId: session.user.id.uuidString.lowercased())
         } catch {
             // No session available or refresh failed.
             await MainActor.run {

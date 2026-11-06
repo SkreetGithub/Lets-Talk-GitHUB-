@@ -239,7 +239,7 @@ struct CallTestingView: View {
                     showCallInterface = true
                 }
             } catch {
-                print("Error starting call: \(error)")
+                debugLog("Error starting call: \(error)")
             }
         }
     }

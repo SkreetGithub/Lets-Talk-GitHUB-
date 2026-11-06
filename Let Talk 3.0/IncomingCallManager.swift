@@ -25,7 +25,7 @@ class IncomingCallManager: ObservableObject {
             try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker])
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
-            print("Error setting up audio session: \(error)")
+            debugLog("Error setting up audio session: \(error)")
         }
     }
     
@@ -186,7 +186,7 @@ class IncomingCallManager: ObservableObject {
         
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
-                print("Error sending notification: \(error)")
+                debugLog("Error sending notification: \(error)")
             }
         }
     }

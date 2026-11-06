@@ -2,11 +2,9 @@ import Foundation
 import CoreGraphics
 
 enum Config {
-    // MARK: - API Keys
-    // NOTE: Do not hardcode secrets in source control. Populate these via `Info.plist`
-    // (or an xcconfig that injects into Info.plist).
-    static let openAIAPIKey = valueFromInfoPlist("OPENAI_API_KEY") ?? "YOUR_OPENAI_API_KEY"
-    static let googleTranslateAPIKey = valueFromInfoPlist("GOOGLE_TRANSLATE_API_KEY") ?? "YOUR_GOOGLE_TRANSLATE_API_KEY"
+    // MARK: - Third-party API keys
+    // Google Translate / OpenAI keys are NOT in the app. They live in Supabase Edge Function secrets
+    // (see supabase/functions). The app calls those functions via `Backend`.
 
     // MARK: - Supabase
     static let supabaseURLString = valueFromInfoPlist("SUPABASE_URL") ?? "https://YOUR_PROJECT_REF.supabase.co"
@@ -73,4 +71,12 @@ private extension Config {
         if trimmed.isEmpty || trimmed.hasPrefix("$(") { return nil }
         return trimmed
     }
+}
+
+/// Debug-only logging. Compiled out of Release builds so no tokens, transcripts, messages or phone numbers are ever logged.
+@inline(__always)
+func debugLog(_ items: Any...) {
+    #if DEBUG
+    print(items.map { "\($0)" }.joined(separator: " "))
+    #endif
 }

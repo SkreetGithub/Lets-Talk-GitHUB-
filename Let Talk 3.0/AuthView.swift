@@ -107,6 +107,9 @@ struct AuthView: View {
                                     .foregroundColor(.white)
                             }
                         }
+
+                        LegalLinksView()
+                            .tint(.white)
                     }
                     .padding()
                 }

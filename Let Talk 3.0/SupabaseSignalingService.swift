@@ -82,6 +82,12 @@ final class SupabaseSignalingService: ObservableObject {
             .execute()
 
         listenForCallUpdates(callId: callId)
+
+        // Ring the callee even if their app is closed (PushKit VoIP via Edge Function). Best effort.
+        let callerName = AuthManager.shared.currentUser?.name ?? "Let Talk"
+        Task {
+            try? await Backend.sendVoIPPush(calleeId: targetUserId, callerName: callerName, callId: callId, video: isVideo)
+        }
         return callId
     }
 

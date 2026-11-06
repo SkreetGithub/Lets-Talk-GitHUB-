@@ -75,7 +75,7 @@ class WebRTCService: NSObject {
                     try session.setActive(true)
                 }
             } catch {
-                print("Error setting up audio session: \(error)")
+                debugLog("Error setting up audio session: \(error)")
             }
             self.audioSession?.unlockForConfiguration()
         }
@@ -175,24 +175,24 @@ class WebRTCService: NSObject {
     
     private func setupVideoCapturer() {
         guard let capturer = videoCapturer else { 
-            print("Video capturer is nil")
+            debugLog("Video capturer is nil")
             return 
         }
         
         let devices = RTCCameraVideoCapturer.captureDevices()
-        print("Available camera devices: \(devices.count)")
+        debugLog("Available camera devices: \(devices.count)")
         
         guard let device = devices.first(where: {
             $0.position == .front
         }) else { 
-            print("No front camera found, trying back camera")
+            debugLog("No front camera found, trying back camera")
             guard let backDevice = devices.first(where: { $0.position == .back }) else {
-                print("No camera devices found")
+                debugLog("No camera devices found")
                 return
             }
             currentCaptureDevice = backDevice
             guard let format = RTCCameraVideoCapturer.supportedFormats(for: backDevice).first else { 
-                print("No supported formats for back camera")
+                debugLog("No supported formats for back camera")
                 return 
             }
             capturer.startCapture(with: backDevice, format: format, fps: 30)
@@ -201,14 +201,14 @@ class WebRTCService: NSObject {
         
         currentCaptureDevice = device
         let formats = RTCCameraVideoCapturer.supportedFormats(for: device)
-        print("Available formats for front camera: \(formats.count)")
+        debugLog("Available formats for front camera: \(formats.count)")
         
         guard let format = formats.first else { 
-            print("No supported formats for front camera")
+            debugLog("No supported formats for front camera")
             return 
         }
         
-        print("Starting video capture with format: \(format)")
+        debugLog("Starting video capture with format: \(format)")
         capturer.startCapture(with: device, format: format, fps: 30)
     }
     
@@ -232,13 +232,13 @@ class WebRTCService: NSObject {
         
         peerConnection?.offer(for: constraints) { [weak self] sdp, error in
             guard let sdp = sdp else {
-                print("Error creating offer: \(error?.localizedDescription ?? "")")
+                debugLog("Error creating offer: \(error?.localizedDescription ?? "")")
                 return
             }
             
             self?.peerConnection?.setLocalDescription(sdp) { error in
                 if let error = error {
-                    print("Error setting local description: \(error)")
+                    debugLog("Error setting local description: \(error)")
                     return
                 }
                 
@@ -253,9 +253,9 @@ class WebRTCService: NSObject {
         localVideoView = view
         if let track = localVideoTrack {
             track.add(view)
-            print("Local video track added to view")
+            debugLog("Local video track added to view")
         } else {
-            print("No local video track available")
+            debugLog("No local video track available")
         }
     }
     
@@ -263,9 +263,9 @@ class WebRTCService: NSObject {
         remoteVideoView = view
         if let track = remoteVideoTrack {
             track.add(view)
-            print("Remote video track added to view")
+            debugLog("Remote video track added to view")
         } else {
-            print("No remote video track available")
+            debugLog("No remote video track available")
         }
     }
     
@@ -390,20 +390,20 @@ class WebRTCService: NSObject {
 
 extension WebRTCService: RTCPeerConnectionDelegate {
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {
-        print("Signaling state changed: \(stateChanged.rawValue)")
+        debugLog("Signaling state changed: \(stateChanged.rawValue)")
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {
-        print("Stream added with \(stream.videoTracks.count) video tracks and \(stream.audioTracks.count) audio tracks")
+        debugLog("Stream added with \(stream.videoTracks.count) video tracks and \(stream.audioTracks.count) audio tracks")
         
         if let videoTrack = stream.videoTracks.first {
             remoteVideoTrack = videoTrack
-            print("Remote video track received")
+            debugLog("Remote video track received")
             if let view = remoteVideoView {
                 videoTrack.add(view)
-                print("Remote video track added to view")
+                debugLog("Remote video track added to view")
             } else {
-                print("No remote video view available yet")
+                debugLog("No remote video view available yet")
             }
             
             // Notify delegate
@@ -412,7 +412,7 @@ extension WebRTCService: RTCPeerConnectionDelegate {
         
         if let audioTrack = stream.audioTracks.first {
             remoteAudioTrack = audioTrack
-            print("Remote audio track received")
+            debugLog("Remote audio track received")
             
             // Notify delegate
             delegate?.webRTCService(self, didReceiveRemoteAudioTrack: audioTrack)
@@ -420,22 +420,22 @@ extension WebRTCService: RTCPeerConnectionDelegate {
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {
-        print("Stream removed")
+        debugLog("Stream removed")
     }
     
     func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {
-        print("Negotiation needed")
+        debugLog("Negotiation needed")
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceConnectionState) {
-        print("ICE connection state changed: \(newState.rawValue)")
+        debugLog("ICE connection state changed: \(newState.rawValue)")
         
         // Notify delegate of connection state changes
         delegate?.webRTCService(self, didChangeConnectionState: newState)
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {
-        print("ICE gathering state changed: \(newState.rawValue)")
+        debugLog("ICE gathering state changed: \(newState.rawValue)")
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
@@ -445,11 +445,11 @@ extension WebRTCService: RTCPeerConnectionDelegate {
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {
-        print("ICE candidates removed")
+        debugLog("ICE candidates removed")
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
-        print("Data channel opened")
+        debugLog("Data channel opened")
         remoteDataChannel = dataChannel
         remoteDataChannel?.delegate = self
     }
@@ -464,12 +464,12 @@ extension WebRTCService: RTCPeerConnectionDelegate {
 
 extension WebRTCService: RTCDataChannelDelegate {
     func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {
-        print("Data channel state changed: \(dataChannel.readyState.rawValue)")
+        debugLog("Data channel state changed: \(dataChannel.readyState.rawValue)")
     }
     
     func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
         if let message = String(data: buffer.data, encoding: .utf8) {
-            print("Received message: \(message)")
+            debugLog("Received message: \(message)")
         }
     }
 }
@@ -515,7 +515,7 @@ extension WebRTCService: SupabaseSignalingDelegate {
     private func handleOffer(_ offer: RTCSessionDescription) {
         peerConnection?.setRemoteDescription(offer) { [weak self] error in
             if let error = error {
-                print("Error setting remote description: \(error)")
+                debugLog("Error setting remote description: \(error)")
                 return
             }
             
@@ -530,7 +530,7 @@ extension WebRTCService: SupabaseSignalingDelegate {
                 
                 self?.peerConnection?.setLocalDescription(sdp) { error in
                     if let error = error {
-                        print("Error setting local description: \(error)")
+                        debugLog("Error setting local description: \(error)")
                         return
                     }
                     
@@ -545,7 +545,7 @@ extension WebRTCService: SupabaseSignalingDelegate {
     private func handleAnswer(_ answer: RTCSessionDescription) {
         peerConnection?.setRemoteDescription(answer) { error in
             if let error = error {
-                print("Error setting remote description: \(error)")
+                debugLog("Error setting remote description: \(error)")
             }
         }
     }
@@ -553,7 +553,7 @@ extension WebRTCService: SupabaseSignalingDelegate {
     private func handleIceCandidate(_ candidate: RTCIceCandidate) {
         peerConnection?.add(candidate) { error in
             if let error = error {
-                print("Error adding ICE candidate: \(error)")
+                debugLog("Error adding ICE candidate: \(error)")
             }
         }
     }

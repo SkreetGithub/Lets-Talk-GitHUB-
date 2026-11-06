@@ -46,7 +46,7 @@ class ProductionCleanupService {
         UserDefaults.standard.removeObject(forKey: "testContacts")
         UserDefaults.standard.removeObject(forKey: "testMessages")
         
-        print("Demo data removed successfully")
+        debugLog("Demo data removed successfully")
     }
     
     // MARK: - Clean User Defaults
@@ -63,7 +63,7 @@ class ProductionCleanupService {
             UserDefaults.standard.removeObject(forKey: key)
         }
         
-        print("UserDefaults cleaned successfully")
+        debugLog("UserDefaults cleaned successfully")
     }
     
     // MARK: - Validate Production Readiness
@@ -114,7 +114,7 @@ class ProductionCleanupService {
         UserDefaults.standard.set("production", forKey: "appEnvironment")
         UserDefaults.standard.set("release", forKey: "buildConfiguration")
         
-        print("App configured for production")
+        debugLog("App configured for production")
     }
     
     // MARK: - Complete Cleanup
@@ -126,7 +126,7 @@ class ProductionCleanupService {
         // Force UserDefaults to save
         UserDefaults.standard.synchronize()
         
-        print("Complete production cleanup performed")
+        debugLog("Complete production cleanup performed")
     }
 }
 

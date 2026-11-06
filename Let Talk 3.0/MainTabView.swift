@@ -635,7 +635,7 @@ struct SettingsView: View {
                                 await MainActor.run {
                                     // Force a UI update to ensure navigation happens
                                     if !authManager.isAuthenticated {
-                                        print("User signed out - AuthView should be showing now")
+                                        debugLog("User signed out - AuthView should be showing now")
                                         // Navigation should already be handled by the main app
                                         // but this ensures it happens
                                     }
@@ -643,7 +643,7 @@ struct SettingsView: View {
                                 
                             } catch {
                                 // Even if there's an error, force dismiss and sign out
-                                print("Sign out error: \(error)")
+                                debugLog("Sign out error: \(error)")
                                 await MainActor.run {
                                     presentationMode.wrappedValue.dismiss()
                                 }

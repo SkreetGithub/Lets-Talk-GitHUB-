@@ -16,6 +16,7 @@ struct Let_Talk_3_0App: App {
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var dataPersistence = DataPersistenceManager.shared
     @StateObject private var settingsManager = SettingsManager.shared
+    @StateObject private var aiConsent = AIConsent.shared
     @State private var isSplashActive = true
     @State private var splashTimer: Timer?
     
@@ -79,13 +80,20 @@ struct Let_Talk_3_0App: App {
                 DynamicIslandViews()
             }
             .preferredColorScheme(preferredColorScheme)
+            .sheet(isPresented: $aiConsent.needsPrompt) {
+                AIConsentView()
+            }
             .onAppear {
                 startSplashTimer()
+                CallKitManager.shared.registerVoIP()
             }
             .onChange(of: authManager.isAuthenticated) { oldValue, newValue in
                 // Force UI update when authentication state changes
                 // This ensures the navigation happens immediately
-                print("Authentication state changed: \(newValue)")
+                if newValue {
+                    CallKitManager.shared.uploadPendingToken()
+                    Task { await ModerationManager.shared.refresh() }
+                }
 
                 // Ensure splash screen is dismissed when auth state changes
                 if isSplashActive {
@@ -153,6 +161,6 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     
     func application(_ application: UIApplication,
                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        print("Failed to register for remote notifications: \(error)")
+        debugLog("Failed to register for remote notifications: \(error)")
     }
 }

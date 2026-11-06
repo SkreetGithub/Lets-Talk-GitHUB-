@@ -100,11 +100,11 @@ class NotificationManager: NSObject, ObservableObject {
                 }
             }
         } catch {
-            print("Error starting call activity: \(error)")
+            debugLog("Error starting call activity: \(error)")
         }
         #else
         // ActivityKit not available - fallback to regular notifications
-        print("ActivityKit not available on this platform")
+        debugLog("ActivityKit not available on this platform")
         #endif
     }
     
@@ -120,7 +120,7 @@ class NotificationManager: NSObject, ObservableObject {
                 activities.removeValue(forKey: id)
             }
         } catch {
-            print("Error updating call activity: \(error)")
+            debugLog("Error updating call activity: \(error)")
         }
         #endif
     }
@@ -260,7 +260,7 @@ class NotificationManager: NSObject, ObservableObject {
         
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
-                print("Error scheduling notification: \(error)")
+                debugLog("Error scheduling notification: \(error)")
             }
         }
     }
@@ -270,7 +270,7 @@ class NotificationManager: NSObject, ObservableObject {
             let granted = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
             return granted
         } catch {
-            print("Error requesting notification permission: \(error)")
+            debugLog("Error requesting notification permission: \(error)")
             return false
         }
     }

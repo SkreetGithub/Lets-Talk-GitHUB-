@@ -7,11 +7,7 @@ class TranslationService: ObservableObject {
     
     private let speechRecognizer = SpeechRecognizer()
     private let synthesizer = AVSpeechSynthesizer()
-    private let googleAPIKey = Config.googleTranslateAPIKey
     private let dataPersistence = DataPersistenceManager.shared
-    private let openAIAPIKey = Config.openAIAPIKey
-    private let googleBaseURL = "https://translation.googleapis.com/language/translate/v2"
-    private let openAIBaseURL = "https://api.openai.com/v1/chat/completions"
     
     private var audioSession: AVAudioSession?
     private var audioEngine: AVAudioEngine?
@@ -33,7 +29,7 @@ class TranslationService: ObservableObject {
             try audioSession?.setCategory(.playAndRecord, mode: .default)
             try audioSession?.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
-            print("Failed to set up audio session: \(error)")
+            debugLog("Failed to set up audio session: \(error)")
         }
     }
     
@@ -42,6 +38,8 @@ class TranslationService: ObservableObject {
             return TranslationResult(originalText: text, translatedText: "", detectedLanguage: sourceLanguage, confidence: 0.0)
         }
         
+        guard AIConsent.shared.requireConsent() else { throw TranslationError.consentRequired }
+
         isTranslating = true
         defer { isTranslating = false }
         
@@ -78,81 +76,25 @@ class TranslationService: ObservableObject {
     }
     
     private func translateWithGoogle(text: String, from sourceLanguage: String, to targetLanguage: String) async throws -> TranslationResult {
-        var components = URLComponents(string: googleBaseURL)
-        components?.queryItems = [
-            URLQueryItem(name: "q", value: text),
-            URLQueryItem(name: "source", value: sourceLanguage),
-            URLQueryItem(name: "target", value: targetLanguage),
-            URLQueryItem(name: "key", value: googleAPIKey)
-        ]
-        
-        guard let url = components?.url else {
-            throw TranslationError.invalidURL
-        }
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        
-        let (data, response) = try await URLSession.shared.data(for: request)
-        
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw TranslationError.serverError
-        }
-        
-        let translationResponse = try JSONDecoder().decode(TranslationResponse.self, from: data)
-        let translatedText = translationResponse.data.translations.first?.translatedText ?? ""
-        
-        return TranslationResult(
-            originalText: text,
-            translatedText: translatedText,
-            detectedLanguage: sourceLanguage,
-            confidence: 0.9
-        )
+        try await translateViaBackend(text: text, from: sourceLanguage, to: targetLanguage, provider: "google", confidence: 0.9)
     }
-    
+
     private func translateWithOpenAI(text: String, from sourceLanguage: String, to targetLanguage: String) async throws -> TranslationResult {
-        guard let url = URL(string: openAIBaseURL) else {
-            throw TranslationError.invalidURL
-        }
-        
-        let targetLanguageName = getLanguageName(for: targetLanguage)
-        let systemPrompt = "You are a professional translator. Translate the given text to \(targetLanguageName). Only return the translated text, nothing else."
-        
-        let requestBody: [String: Any] = [
-            "model": "gpt-3.5-turbo",
-            "messages": [
-                ["role": "system", "content": systemPrompt],
-                ["role": "user", "content": text]
-            ],
-            "max_tokens": 1000,
-            "temperature": 0.3
-        ]
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(openAIAPIKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
-        
-        let (data, response) = try await URLSession.shared.data(for: request)
-        
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw TranslationError.serverError
-        }
-        
-        let openAIResponse = try JSONDecoder().decode(OpenAIResponse.self, from: data)
-        let translatedText = openAIResponse.choices.first?.message.content.trimmingCharacters(in: .whitespacesAndNewlines) ?? text
-        
+        try await translateViaBackend(text: text, from: sourceLanguage, to: targetLanguage, provider: "openai", confidence: 0.95)
+    }
+
+    /// All provider calls go through the `translate` Edge Function; no API keys exist in the app.
+    private func translateViaBackend(text: String, from sourceLanguage: String, to targetLanguage: String, provider: String, confidence: Double) async throws -> TranslationResult {
+        let source: String? = (sourceLanguage.isEmpty || sourceLanguage == "auto") ? nil : sourceLanguage
+        let response = try await Backend.translate(text: text, source: source, target: targetLanguage, provider: provider)
         return TranslationResult(
             originalText: text,
-            translatedText: translatedText,
-            detectedLanguage: sourceLanguage,
-            confidence: 0.95
+            translatedText: response.translatedText,
+            detectedLanguage: response.detectedLanguage ?? sourceLanguage,
+            confidence: confidence
         )
     }
-    
+
     private func getLanguageName(for code: String) -> String {
         let languageNames: [String: String] = [
             "en": "English",
@@ -246,11 +188,11 @@ class TranslationService: ObservableObject {
                             }
                         }
                     } catch {
-                        print("Real-time translation error: \(error)")
+                        debugLog("Real-time translation error: \(error)")
                     }
                 }
             case .failure(let error):
-                print("Speech recognition error: \(error)")
+                debugLog("Speech recognition error: \(error)")
             }
         }
     }
@@ -405,7 +347,7 @@ class SpeechRecognizer {
         do {
             try audioSession?.setActive(false, options: .notifyOthersOnDeactivation)
         } catch {
-            print("Error deactivating audio session: \(error)")
+            debugLog("Error deactivating audio session: \(error)")
         }
         
         // Clear references
@@ -436,6 +378,7 @@ enum TranslationError: Error {
     case invalidImage
     case ocrFailed
     case networkError
+    case consentRequired
 }
 
 enum SpeechRecognitionError: Error {
@@ -459,6 +402,8 @@ extension TranslationError: LocalizedError {
             return "Failed to extract text from image"
         case .networkError:
             return "Network error occurred"
+        case .consentRequired:
+            return "Please agree to translation data sharing first"
         }
     }
 }

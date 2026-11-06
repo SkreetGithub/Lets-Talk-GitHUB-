@@ -256,7 +256,7 @@ struct DocumentScannerView: UIViewControllerRepresentable {
         }
         
         func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) {
-            print("Document scanner failed with error: \(error)")
+            debugLog("Document scanner failed with error: \(error)")
             parent.presentationMode.wrappedValue.dismiss()
         }
     }

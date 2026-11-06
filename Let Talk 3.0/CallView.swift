@@ -444,7 +444,7 @@ class CallViewModel: ObservableObject, WebRTCServiceDelegate {
             dialTonePlayer?.volume = 0.3
             dialTonePlayer?.play()
         } catch {
-            print("Error playing dial tone: \(error)")
+            debugLog("Error playing dial tone: \(error)")
             // Fallback to system sound
             let dialToneSound = SystemSoundID(1000)
             AudioServicesPlaySystemSound(dialToneSound)

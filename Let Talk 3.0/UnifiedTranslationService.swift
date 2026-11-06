@@ -252,7 +252,7 @@ class UnifiedTranslationViewModel: ObservableObject {
         do {
             try AVAudioSession.sharedInstance().setActive(false)
         } catch {
-            print("Failed to deactivate audio session: \(error)")
+            debugLog("Failed to deactivate audio session: \(error)")
         }
     }
     

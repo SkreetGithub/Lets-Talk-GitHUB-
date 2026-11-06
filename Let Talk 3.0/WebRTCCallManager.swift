@@ -54,7 +54,7 @@ class WebRTCCallManager: NSObject, ObservableObject {
                 try session.setActive(true)
             }
         } catch {
-            print("Error setting up audio session: \(error)")
+            debugLog("Error setting up audio session: \(error)")
         }
         audioSession?.unlockForConfiguration()
     }
@@ -202,7 +202,7 @@ class WebRTCCallManager: NSObject, ObservableObject {
                 }
             }
         } catch {
-            print("Error toggling speaker: \(error)")
+            debugLog("Error toggling speaker: \(error)")
         }
         audioSession?.unlockForConfiguration()
     }
@@ -276,6 +276,12 @@ class WebRTCCallManager: NSObject, ObservableObject {
         capturer.startCapture(with: cameraDevice, format: format, fps: 30)
     }
     
+    /// Sends a small payload (live-translation subtitles) to the other participant.
+    func sendData(_ data: Data) {
+        guard let channel = dataChannel, channel.readyState == .open else { return }
+        channel.sendData(RTCDataBuffer(data: data, isBinary: false))
+    }
+
     private func createDataChannel() {
         let config = RTCDataChannelConfiguration()
         config.isOrdered = true
@@ -408,11 +414,11 @@ class WebRTCCallManager: NSObject, ObservableObject {
 
 extension WebRTCCallManager: RTCPeerConnectionDelegate {
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {
-        print("Signaling state changed: \(stateChanged.rawValue)")
+        debugLog("Signaling state changed: \(stateChanged.rawValue)")
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {
-        print("Stream added")
+        debugLog("Stream added")
         
         if let videoTrack = stream.videoTracks.first {
             remoteVideoTrack = videoTrack
@@ -424,15 +430,15 @@ extension WebRTCCallManager: RTCPeerConnectionDelegate {
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {
-        print("Stream removed")
+        debugLog("Stream removed")
     }
     
     func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {
-        print("Negotiation needed")
+        debugLog("Negotiation needed")
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceConnectionState) {
-        print("ICE connection state changed: \(newState.rawValue)")
+        debugLog("ICE connection state changed: \(newState.rawValue)")
         
         DispatchQueue.main.async {
             self.connectionState = newState
@@ -453,11 +459,11 @@ extension WebRTCCallManager: RTCPeerConnectionDelegate {
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {
-        print("ICE gathering state changed: \(newState.rawValue)")
+        debugLog("ICE gathering state changed: \(newState.rawValue)")
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
-        print("Generated ICE candidate")
+        debugLog("Generated ICE candidate")
         
         Task {
             try? await signalingService.sendIceCandidate(
@@ -468,11 +474,13 @@ extension WebRTCCallManager: RTCPeerConnectionDelegate {
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {
-        print("ICE candidates removed")
+        debugLog("ICE candidates removed")
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
-        print("Data channel opened")
+        // The callee receives the channel created by the caller.
+        dataChannel.delegate = self
+        self.dataChannel = dataChannel
     }
 }
 
@@ -480,12 +488,13 @@ extension WebRTCCallManager: RTCPeerConnectionDelegate {
 
 extension WebRTCCallManager: RTCDataChannelDelegate {
     func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {
-        print("Data channel state changed: \(dataChannel.readyState.rawValue)")
+        debugLog("Data channel state changed: \(dataChannel.readyState.rawValue)")
     }
     
     func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
-        if let message = String(data: buffer.data, encoding: .utf8) {
-            print("Received data channel message: \(message)")
+        let data = buffer.data
+        Task { @MainActor in
+            LiveTranslationSession.shared.handleIncoming(data)
         }
     }
 }
@@ -522,7 +531,7 @@ extension WebRTCCallManager: SupabaseSignalingDelegate {
     }
     
     func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveError error: Error) {
-        print("Signaling error: \(error)")
+        debugLog("Signaling error: \(error)")
         DispatchQueue.main.async {
             self.callStatus = .failed
         }
@@ -534,7 +543,7 @@ extension WebRTCCallManager: SupabaseSignalingDelegate {
         let offer = RTCSessionDescription(type: .offer, sdp: sdp)
         peerConnection?.setRemoteDescription(offer) { [weak self] error in
             if let error = error {
-                print("Error setting remote description: \(error)")
+                debugLog("Error setting remote description: \(error)")
                 return
             }
             
@@ -550,7 +559,7 @@ extension WebRTCCallManager: SupabaseSignalingDelegate {
         let answer = RTCSessionDescription(type: .answer, sdp: sdp)
         peerConnection?.setRemoteDescription(answer) { error in
             if let error = error {
-                print("Error setting remote description: \(error)")
+                debugLog("Error setting remote description: \(error)")
             }
         }
     }
@@ -563,7 +572,7 @@ extension WebRTCCallManager: SupabaseSignalingDelegate {
         let iceCandidate = RTCIceCandidate(sdp: candidate, sdpMLineIndex: sdpMLineIndex, sdpMid: sdpMid)
         peerConnection?.add(iceCandidate) { error in
             if let error = error {
-                print("Error adding ICE candidate: \(error)")
+                debugLog("Error adding ICE candidate: \(error)")
             }
         }
     }

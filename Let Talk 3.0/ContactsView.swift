@@ -300,7 +300,7 @@ class ContactsViewModel: ObservableObject {
             do {
                 // Check if user is authenticated
                 guard let currentUserId = AuthManager.shared.currentUserId, !currentUserId.isEmpty else {
-                    print("Error: User not authenticated or user ID is empty")
+                    debugLog("Error: User not authenticated or user ID is empty")
                     await MainActor.run {
                         self.error = NSError(domain: "ContactsView", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
                         self.showError = true
@@ -309,7 +309,7 @@ class ContactsViewModel: ObservableObject {
                     return
                 }
                 
-                print("Starting chat with contact: \(contact.name), User ID: \(currentUserId)")
+                debugLog("Starting chat with contact: \(contact.name), User ID: \(currentUserId)")
                 
                 let chat = try await DatabaseManager.shared.createOrUpdateChat(
                     senderId: currentUserId,
@@ -319,7 +319,7 @@ class ContactsViewModel: ObservableObject {
                     completion(chat)
                 }
             } catch {
-                print("Error creating chat: \(error)")
+                debugLog("Error creating chat: \(error)")
                 await MainActor.run {
                     self.error = error
                     self.showError = true
@@ -445,7 +445,7 @@ class AddContactViewModel: ObservableObject {
                 try await contactManager.addContact(contact)
             } catch {
                 // Handle error
-                print("Error adding contact: \(error)")
+                debugLog("Error adding contact: \(error)")
             }
         }
     }
@@ -559,7 +559,7 @@ struct ContactDetailsView: View {
             do {
                 try await WebRTCService.shared.startCall(to: contact.phone, isVideo: false)
             } catch {
-                print("Error starting audio call: \(error)")
+                debugLog("Error starting audio call: \(error)")
             }
         }
     }
@@ -569,7 +569,7 @@ struct ContactDetailsView: View {
             do {
                 try await WebRTCService.shared.startVideoCall(to: contact.phone)
             } catch {
-                print("Error starting video call: \(error)")
+                debugLog("Error starting video call: \(error)")
             }
         }
     }
@@ -588,7 +588,7 @@ struct ContactDetailsView: View {
                     self.showChatView = true
                 }
             } catch {
-                print("Error creating chat: \(error)")
+                debugLog("Error creating chat: \(error)")
             }
         }
     }
