@@ -124,15 +124,6 @@ struct Let_Talk_3_0App: App {
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        // Configure Google Sign-In (uncomment when SDK is added)
-        /*
-        if let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
-           let plist = NSDictionary(contentsOfFile: path),
-           let clientId = plist["CLIENT_ID"] as? String {
-            GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientId)
-        }
-        */
-        
         // Configure Push Notifications
         let notificationCenter = UNUserNotificationCenter.current()
         notificationCenter.delegate = NotificationManager.shared

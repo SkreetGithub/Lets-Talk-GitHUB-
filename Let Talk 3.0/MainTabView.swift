@@ -482,7 +482,7 @@ class MainTabViewModel: ObservableObject {
         }
         
         // Start listening for incoming calls (Supabase-backed signaling)
-        FirebaseSignalingService.shared.startListeningForIncomingCalls()
+        SupabaseSignalingService.shared.startListeningForIncomingCalls()
     }
     
     func cleanupUserPresence() {

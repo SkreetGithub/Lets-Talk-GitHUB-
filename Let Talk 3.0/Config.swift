@@ -8,7 +8,7 @@ enum Config {
     static let openAIAPIKey = valueFromInfoPlist("OPENAI_API_KEY") ?? "YOUR_OPENAI_API_KEY"
     static let googleTranslateAPIKey = valueFromInfoPlist("GOOGLE_TRANSLATE_API_KEY") ?? "YOUR_GOOGLE_TRANSLATE_API_KEY"
 
-    // MARK: - Supabase (replaces Firebase backend)
+    // MARK: - Supabase
     static let supabaseURLString = valueFromInfoPlist("SUPABASE_URL") ?? "https://YOUR_PROJECT_REF.supabase.co"
     static let supabaseAnonKey = valueFromInfoPlist("SUPABASE_ANON_KEY") ?? "YOUR_SUPABASE_ANON_KEY"
     static let supabaseStorageBucket = valueFromInfoPlist("SUPABASE_STORAGE_BUCKET") ?? "public"

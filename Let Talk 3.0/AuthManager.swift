@@ -10,7 +10,9 @@ final class AuthManager: ObservableObject {
     @Published var currentUser: User?
     @Published var isLoading = false
     @Published var error: Error?
+    #if DEBUG
     @Published var isDemoMode = false
+    #endif
     @Published var needsPhoneVerification = false
 
     private let client = SupabaseManager.client
@@ -103,6 +105,38 @@ final class AuthManager: ObservableObject {
                 await MainActor.run {
                     self.isAuthenticated = false
                     self.needsPhoneVerification = false
+                }
+            }
+        } catch {
+            await MainActor.run { self.error = error }
+            throw error
+        }
+    }
+
+    /// Sign in with Apple, exchanged for a Supabase session. Requires the Apple provider
+    /// to be enabled in Supabase (Authentication -> Providers -> Apple).
+    func signInWithApple(credential: ASAuthorizationAppleIDCredential, rawNonce: String) async throws {
+        guard NetworkMonitorService.shared.isConnected else { throw AuthError.networkError }
+        guard let tokenData = credential.identityToken,
+              let idToken = String(data: tokenData, encoding: .utf8) else {
+            throw AuthError.custom("Apple did not return an identity token.")
+        }
+        await MainActor.run { self.isLoading = true }
+        defer { Task { @MainActor in self.isLoading = false } }
+
+        do {
+            let session = try await client.auth.signInWithIdToken(
+                credentials: OpenIDConnectCredentials(provider: .apple, idToken: idToken, nonce: rawNonce)
+            )
+            let userId = session.user.id.uuidString
+            await fetchUserProfile(userId: userId)
+
+            // Apple only sends the name on the first sign-in; keep it if we have it.
+            if let parts = credential.fullName {
+                let name = [parts.givenName, parts.familyName].compactMap { $0 }.joined(separator: " ")
+                if !name.isEmpty, currentUser?.name == "User" {
+                    try? await updateProfileFields(userId: userId, fields: ["name": .string(name)])
+                    await fetchUserProfile(userId: userId)
                 }
             }
         } catch {

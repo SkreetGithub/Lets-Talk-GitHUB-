@@ -184,6 +184,7 @@ final class MessageManager: ObservableObject {
 
     // MARK: - Demo Data
 
+    #if DEBUG
     func loadDemoMessages() {
         let demoMessages: [String: [Message]] = [
             "demo-1": [
@@ -200,6 +201,7 @@ final class MessageManager: ObservableObject {
 
         messages = demoMessages
     }
+    #endif
 }
 
 enum MessageError: Error, LocalizedError {

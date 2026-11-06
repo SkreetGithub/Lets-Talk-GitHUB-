@@ -10,7 +10,7 @@ class AppStatusChecker: ObservableObject {
     @Published var isProductionReady = false
     @Published var hasDemoData = false
     @Published var networkStatus = "Unknown"
-    @Published var firebaseStatus = "Unknown" // legacy name; now reflects Supabase backend status
+    @Published var backendStatus = "Unknown" // legacy name; now reflects Supabase backend status
     @Published var biometricStatus = "Unknown"
     @Published var storageStatus = "Unknown"
     @Published var issues: [String] = []
@@ -22,7 +22,7 @@ class AppStatusChecker: ObservableObject {
     func checkAppStatus() {
         checkDemoData()
         checkNetworkStatus()
-        checkFirebaseStatus()
+        checkBackendStatus()
         checkBiometricStatus()
         checkStorageStatus()
         validateProductionReadiness()
@@ -50,14 +50,14 @@ class AppStatusChecker: ObservableObject {
         }
     }
     
-    private func checkFirebaseStatus() {
-        // Firebase has been removed; check whether Supabase is configured.
+    private func checkBackendStatus() {
+        // Check whether Supabase is configured.
         let isConfigured =
             !Config.supabaseAnonKey.isEmpty &&
             !Config.supabaseURLString.isEmpty &&
             !Config.supabaseAnonKey.hasPrefix("YOUR_") &&
             !Config.supabaseURLString.contains("YOUR_PROJECT_REF")
-        firebaseStatus = isConfigured ? "Supabase Configured" : "Supabase Not Configured"
+        backendStatus = isConfigured ? "Supabase Configured" : "Supabase Not Configured"
     }
     
     private func checkBiometricStatus() {
@@ -99,7 +99,7 @@ class AppStatusChecker: ObservableObject {
         }
         
         // Check backend status
-        if firebaseStatus.contains("Not Configured") {
+        if backendStatus.contains("Not Configured") {
             issues.append("Supabase not configured")
         }
         
@@ -173,7 +173,7 @@ struct AppStatusView: View {
                 if showDetails {
                     VStack(alignment: .leading, spacing: 10) {
                         StatusRow(title: "Network", status: statusChecker.networkStatus)
-                        StatusRow(title: "Backend", status: statusChecker.firebaseStatus)
+                        StatusRow(title: "Backend", status: statusChecker.backendStatus)
                         StatusRow(title: "Biometric", status: statusChecker.biometricStatus)
                         StatusRow(title: "Storage", status: statusChecker.storageStatus)
                         StatusRow(title: "Demo Data", status: statusChecker.hasDemoData ? "Present" : "Clean")

@@ -2,10 +2,9 @@ import Foundation
 import Supabase
 import WebRTC
 
-// NOTE: Firebase has been removed. This class name is kept to avoid rewriting
-// large parts of the UI/WebRTC stack, but the implementation now uses Supabase.
-final class FirebaseSignalingService: ObservableObject {
-    static let shared = FirebaseSignalingService()
+// Call signaling over Supabase (calls + signaling tables / realtime).
+final class SupabaseSignalingService: ObservableObject {
+    static let shared = SupabaseSignalingService()
 
     private let client = SupabaseManager.client
 
@@ -31,17 +30,17 @@ final class FirebaseSignalingService: ObservableObject {
 
     // MARK: - Delegate Management
 
-    func addDelegate(_ delegate: FirebaseSignalingDelegate) {
+    func addDelegate(_ delegate: SupabaseSignalingDelegate) {
         delegates.add(delegate)
     }
 
-    func removeDelegate(_ delegate: FirebaseSignalingDelegate) {
+    func removeDelegate(_ delegate: SupabaseSignalingDelegate) {
         delegates.remove(delegate)
     }
 
-    private func notify(_ block: (FirebaseSignalingDelegate) -> Void) {
+    private func notify(_ block: (SupabaseSignalingDelegate) -> Void) {
         for obj in delegates.allObjects {
-            guard let d = obj as? FirebaseSignalingDelegate else { continue }
+            guard let d = obj as? SupabaseSignalingDelegate else { continue }
             block(d)
         }
     }
@@ -207,10 +206,10 @@ final class FirebaseSignalingService: ObservableObject {
             let calls = try decoder.decode([CallRowData].self, from: response.data)
 
             for call in calls {
-                notify { $0.firebaseSignaling(self, didReceiveIncomingCall: call.asCall) }
+                notify { $0.supabaseSignaling(self, didReceiveIncomingCall: call.asCall) }
             }
         } catch {
-            notify { $0.firebaseSignaling(self, didReceiveError: error) }
+            notify { $0.supabaseSignaling(self, didReceiveError: error) }
         }
     }
 
@@ -236,9 +235,9 @@ final class FirebaseSignalingService: ObservableObject {
                 .execute()
 
             let row = try decoder.decode(CallRowData.self, from: response.data)
-            notify { $0.firebaseSignaling(self, didReceiveCallUpdate: row.asCall) }
+            notify { $0.supabaseSignaling(self, didReceiveCallUpdate: row.asCall) }
         } catch {
-            notify { $0.firebaseSignaling(self, didReceiveError: error) }
+            notify { $0.supabaseSignaling(self, didReceiveError: error) }
         }
     }
 
@@ -281,12 +280,12 @@ final class FirebaseSignalingService: ObservableObject {
                     continue
                 }
 
-                notify { $0.firebaseSignaling(self, didReceiveSignalingMessage: row.asSignalingMessage) }
+                notify { $0.supabaseSignaling(self, didReceiveSignalingMessage: row.asSignalingMessage) }
             }
 
             processedMessageIdsByCall[callId] = processed
         } catch {
-            notify { $0.firebaseSignaling(self, didReceiveError: error) }
+            notify { $0.supabaseSignaling(self, didReceiveError: error) }
         }
     }
 
@@ -316,11 +315,11 @@ final class FirebaseSignalingService: ObservableObject {
 
 // MARK: - Delegate
 
-protocol FirebaseSignalingDelegate: AnyObject {
-    func firebaseSignaling(_ service: FirebaseSignalingService, didReceiveCallUpdate call: Call)
-    func firebaseSignaling(_ service: FirebaseSignalingService, didReceiveIncomingCall call: Call)
-    func firebaseSignaling(_ service: FirebaseSignalingService, didReceiveSignalingMessage message: SignalingMessage)
-    func firebaseSignaling(_ service: FirebaseSignalingService, didReceiveError error: Error)
+protocol SupabaseSignalingDelegate: AnyObject {
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveCallUpdate call: Call)
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveIncomingCall call: Call)
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveSignalingMessage message: SignalingMessage)
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveError error: Error)
 }
 
 // MARK: - Data Models

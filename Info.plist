@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Let Talk</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>GOOGLE_TRANSLATE_API_KEY</key>
+	<string>$(GOOGLE_TRANSLATE_API_KEY)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Let Talk uses the camera for video calls.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Let Talk uses the microphone for voice and video calls and live translation.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Let Talk lets you pick photos to share in chats and set your profile picture.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Let Talk uses speech recognition to translate what you say during calls.</string>
+	<key>OPENAI_API_KEY</key>
+	<string>$(OPENAI_API_KEY)</string>
+	<key>SUPABASE_ANON_KEY</key>
+	<string>$(SUPABASE_ANON_KEY)</string>
+	<key>SUPABASE_STORAGE_BUCKET</key>
+	<string>$(SUPABASE_STORAGE_BUCKET)</string>
+	<key>SUPABASE_URL</key>
+	<string>$(SUPABASE_URL)</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>remote-notification</string>
+	</array>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+</dict>
+</plist>

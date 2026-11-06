@@ -28,7 +28,7 @@ class WebRTCService: NSObject {
     private var remoteVideoView: RTCMTLVideoView?
     private var audioQueue = DispatchQueue(label: "audio.queue")
     private var audioSession: RTCAudioSession?
-    private var signalingService = FirebaseSignalingService.shared
+    private var signalingService = SupabaseSignalingService.shared
     private var currentTarget: String?
     private var isInitiator = false
     private var currentCallId: String?
@@ -283,11 +283,11 @@ class WebRTCService: NSObject {
             callParticipants.append(participant)
             isMultiCall = callParticipants.count > 1
             
-            // Notify Firebase about participant addition
+            // Notify the signaling backend about participant addition
             if currentCallId != nil {
                 Task {
                     // Add participant logic would go here
-                    // This would require additional Firebase methods
+                    // This would require additional signaling methods
                 }
             }
         }
@@ -298,11 +298,11 @@ class WebRTCService: NSObject {
         callParticipants.removeAll { $0 == participant }
         isMultiCall = callParticipants.count > 1
         
-        // Notify Firebase about participant removal
+        // Notify the signaling backend about participant removal
         if currentCallId != nil {
             Task {
                 // Remove participant logic would go here
-                // This would require additional Firebase methods
+                // This would require additional signaling methods
             }
         }
     }
@@ -474,17 +474,17 @@ extension WebRTCService: RTCDataChannelDelegate {
     }
 }
 
-extension WebRTCService: FirebaseSignalingDelegate {
-    func firebaseSignaling(_ service: FirebaseSignalingService, didReceiveCallUpdate call: Call) {
+extension WebRTCService: SupabaseSignalingDelegate {
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveCallUpdate call: Call) {
         // Handle call updates
     }
     
-    func firebaseSignaling(_ service: FirebaseSignalingService, didReceiveIncomingCall call: Call) {
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveIncomingCall call: Call) {
         // Handle incoming calls
         handleIncomingCall(callId: call.id, from: call.callerId, isVideo: call.isVideo)
     }
     
-    func firebaseSignaling(_ service: FirebaseSignalingService, didReceiveSignalingMessage message: SignalingMessage) {
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveSignalingMessage message: SignalingMessage) {
         switch message.type {
         case .offer:
             if let sdp = message.sdp {
@@ -508,7 +508,7 @@ extension WebRTCService: FirebaseSignalingDelegate {
         }
     }
     
-    func firebaseSignaling(_ service: FirebaseSignalingService, didReceiveError error: Error) {
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveError error: Error) {
         delegate?.webRTCService(self, didReceiveError: error)
     }
     
@@ -560,4 +560,4 @@ extension WebRTCService: FirebaseSignalingDelegate {
 }
 
 // MARK: - Note
-// Signaling is handled by `FirebaseSignalingService` (Supabase-backed implementation).
+// Signaling is handled by `SupabaseSignalingService` (Supabase-backed implementation).

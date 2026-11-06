@@ -76,7 +76,7 @@ class IncomingCallManager: ObservableObject {
         // Reject call in Supabase-backed signaling
         if let call = currentIncomingCall {
             Task {
-                try? await FirebaseSignalingService.shared.rejectCall(callId: call.id)
+                try? await SupabaseSignalingService.shared.rejectCall(callId: call.id)
             }
         }
         

@@ -61,6 +61,5 @@ Temporary Items
 *.tmp
 
 # API Keys and Secrets (keep local, don't commit)
-Let Talk 3.0/Info.plist
-Info.plist
+Secrets.xcconfig
 

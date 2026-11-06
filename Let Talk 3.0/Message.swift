@@ -103,12 +103,14 @@ struct Message: Identifiable, Codable, Hashable {
     }
     
     // Sample messages for preview
+    #if DEBUG
     static var sampleMessages: [Message] = [
         Message(senderId: "user1", receiverId: "user2", content: "Hey, how are you?"),
         Message(senderId: "user2", receiverId: "user1", content: "I'm good, thanks! How about you?", status: .read),
         Message(senderId: "user1", receiverId: "user2", content: "Doing great! Want to catch up later?"),
         Message(senderId: "user2", receiverId: "user1", content: "Sure, that sounds good!", status: .delivered)
     ]
+    #endif
 }
 
 // MARK: - Message Encryption Extension

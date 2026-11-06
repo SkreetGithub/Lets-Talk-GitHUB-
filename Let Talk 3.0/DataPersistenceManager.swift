@@ -292,8 +292,8 @@ final class DataPersistenceManager: ObservableObject {
 
     // MARK: - Sync Management
 
-    /// Backwards-compatible name: Firebase has been removed; this now syncs from Supabase.
-    func syncWithFirebase() async {
+    /// Syncs local data from Supabase.
+    func syncWithSupabase() async {
         await syncWithBackend()
     }
 

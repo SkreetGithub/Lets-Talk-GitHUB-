@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NewChatView: View {
     @Environment(\.presentationMode) var presentationMode
+    @ObservedObject private var contactManager = ContactManager.shared
     @State private var searchText = ""
     @State private var selectedContacts: Set<Contact> = []
     
@@ -26,7 +27,7 @@ struct NewChatView: View {
                 
                 // Contact list
                 List {
-                    ForEach(mockContacts) { contact in
+                    ForEach(visibleContacts) { contact in
                         ContactRow(contact: contact)
                             .onTapGesture {
                                 if selectedContacts.contains(contact) {
@@ -53,13 +54,26 @@ struct NewChatView: View {
         }
     }
     
-    private var mockContacts: [Contact] {
-        [
-            Contact(name: "John Doe", phone: "123-456-7890", email: "john@example.com", lastMessage: "Hello!", image: nil),
-            Contact(name: "Jane Smith", phone: "098-765-4321", email: "jane@example.com", lastMessage: "How are you?", image: nil),
-            Contact(name: "Bob Johnson", phone: "555-123-4567", email: "bob@example.com", lastMessage: "See you later!", image: nil)
-        ]
+    /// The signed-in user's real contacts, filtered by the search box.
+    private var visibleContacts: [Contact] {
+        var list = contactManager.contacts
+        #if DEBUG
+        if list.isEmpty { list = Self.previewContacts }
+        #endif
+        guard !searchText.isEmpty else { return list }
+        return list.filter { c in
+            c.name.localizedCaseInsensitiveContains(searchText) ||
+            c.phone.contains(searchText) ||
+            c.email.localizedCaseInsensitiveContains(searchText)
+        }
     }
+
+    #if DEBUG
+    private static let previewContacts: [Contact] = [
+        Contact(name: "John Doe", phone: "123-456-7890", email: "john@example.com", lastMessage: "Hello!", image: nil),
+        Contact(name: "Jane Smith", phone: "098-765-4321", email: "jane@example.com", lastMessage: "How are you?", image: nil)
+    ]
+    #endif
 }
 
 // ContactRow is defined in ContactsView.swift

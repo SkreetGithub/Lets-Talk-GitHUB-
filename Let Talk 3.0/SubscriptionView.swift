@@ -430,7 +430,7 @@ class SubscriptionViewModel: ObservableObject {
     
     func handlePaymentSuccess() {
         isSubscribed = true
-        // Update user subscription status in Firebase
+        // Update user subscription status in Supabase
     }
 }
 

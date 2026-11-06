@@ -149,6 +149,13 @@ struct EnhancedAuthView: View {
                             .disabled(isLoading)
                         }
                         
+                        AppleSignInButton(
+                            label: isLoginMode ? .signIn : .signUp,
+                            onSuccess: handleAppleSignInSuccess,
+                            onError: { message in errorMessage = message }
+                        )
+                        .disabled(isLoading || !networkMonitor.isConnected)
+
                         // Toggle mode button
                         Button(action: toggleMode) {
                             Text(isLoginMode ? "Don't have an account? Sign Up" : "Already have an account? Sign In")
@@ -236,6 +243,14 @@ struct EnhancedAuthView: View {
         }
     }
     
+    private func handleAppleSignInSuccess() {
+        if authManager.needsPhoneVerification {
+            showPhoneVerification = true
+        } else {
+            showMainApp = true
+        }
+    }
+
     private func toggleMode() {
         withAnimation {
             isLoginMode.toggle()

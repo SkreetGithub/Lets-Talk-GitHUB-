@@ -68,6 +68,7 @@ struct Contact: Identifiable, Hashable, Codable {
     }
     
     // Sample contacts for preview and testing
+    #if DEBUG
     static var sampleContacts: [Contact] = [
         Contact(name: "John Doe", phone: "(555) 123-4567", email: "john@example.com", lastMessage: "Hey, how are you?"),
         Contact(name: "Jane Smith", phone: "(555) 987-6543", email: "jane@example.com", lastMessage: "Can we meet tomorrow?"),
@@ -75,4 +76,5 @@ struct Contact: Identifiable, Hashable, Codable {
         Contact(name: "Sarah Wilson", phone: "(555) 234-5678", email: "sarah@example.com", lastMessage: "See you soon!"),
         Contact(name: "Mike Brown", phone: "(555) 876-5432", email: "mike@example.com", lastMessage: "Great work!")
     ]
+    #endif
 }

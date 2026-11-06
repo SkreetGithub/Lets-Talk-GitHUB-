@@ -33,7 +33,7 @@ class WebRTCCallManager: NSObject, ObservableObject {
         return STUNTurnConfiguration.shared.getRTCConfiguration()
     }()
     
-    private var signalingService = FirebaseSignalingService.shared
+    private var signalingService = SupabaseSignalingService.shared
     private var audioSession: RTCAudioSession?
     
     override init() {
@@ -490,23 +490,23 @@ extension WebRTCCallManager: RTCDataChannelDelegate {
     }
 }
 
-// MARK: - FirebaseSignalingDelegate
+// MARK: - SupabaseSignalingDelegate
 
-extension WebRTCCallManager: FirebaseSignalingDelegate {
-    func firebaseSignaling(_ service: FirebaseSignalingService, didReceiveCallUpdate call: Call) {
+extension WebRTCCallManager: SupabaseSignalingDelegate {
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveCallUpdate call: Call) {
         DispatchQueue.main.async {
             self.currentCall = call
         }
     }
     
-    func firebaseSignaling(_ service: FirebaseSignalingService, didReceiveIncomingCall call: Call) {
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveIncomingCall call: Call) {
         DispatchQueue.main.async {
             self.currentCall = call
             self.callStatus = .incoming
         }
     }
     
-    func firebaseSignaling(_ service: FirebaseSignalingService, didReceiveSignalingMessage message: SignalingMessage) {
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveSignalingMessage message: SignalingMessage) {
         switch message.type {
         case .offer:
             handleOffer(message: message)
@@ -521,7 +521,7 @@ extension WebRTCCallManager: FirebaseSignalingDelegate {
         }
     }
     
-    func firebaseSignaling(_ service: FirebaseSignalingService, didReceiveError error: Error) {
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveError error: Error) {
         print("Signaling error: \(error)")
         DispatchQueue.main.async {
             self.callStatus = .failed

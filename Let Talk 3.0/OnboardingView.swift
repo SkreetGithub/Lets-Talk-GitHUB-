@@ -21,7 +21,7 @@ struct OnboardingView: View {
             title: "Secure & Private",
             subtitle: "Your conversations are protected",
             image: "lock.shield.fill",
-            description: "End-to-end encryption ensures your messages and calls remain private and secure."
+            description: "Your messages and calls travel over secure, encrypted connections."
         ),
         OnboardingPage(
             title: "Ready to Connect?",

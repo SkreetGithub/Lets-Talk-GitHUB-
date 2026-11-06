@@ -38,8 +38,7 @@ class NotificationManager: NSObject, ObservableObject {
     }
 
     /// Hook called by `AppDelegate` after APNs registration.
-    /// (Firebase/FCM has been removed; if you need remote push, implement your own
-    /// server-side push provider and store this token in Supabase.)
+    /// (Remote push needs a server-side provider; store this token in Supabase.)
     @MainActor
     func didRegisterForRemoteNotifications(token: String) async {
         UserDefaults.standard.set(token, forKey: "apnsToken")

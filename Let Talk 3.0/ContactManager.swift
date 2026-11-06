@@ -149,8 +149,10 @@ final class ContactManager: ObservableObject {
 
     // MARK: - Demo Data
 
+    #if DEBUG
     func loadDemoContacts() {
         contacts = Contact.sampleContacts
         updateFilteredContacts()
     }
+    #endif
 }
