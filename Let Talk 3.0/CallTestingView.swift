@@ -1,3 +1,4 @@
+#if DEBUG
 import SwiftUI
 import WebRTC
 
@@ -328,3 +329,5 @@ struct CallTestingView_Previews: PreviewProvider {
             .environmentObject(AuthManager.shared)
     }
 }
+
+#endif
