@@ -404,29 +404,23 @@ struct EmptyStateView: View {
         self.action = action
     }
     
+    // Built on Apple's ContentUnavailableView so every list's empty state is centered and
+    // sized the system way; lifted above the floating tab bar so it reads as centered.
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: icon)
-                .font(.system(size: 60))
-                .foregroundColor(.secondary)
-            
-            VStack(spacing: 8) {
-                Text(title)
-                    .font(.title2)
-                    .fontWeight(.medium)
-                
-                Text(message)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            
-            if let actionTitle = actionTitle, let action = action {
+        ContentUnavailableView {
+            Label(title, systemImage: icon)
+                .symbolRenderingMode(.hierarchical)
+        } description: {
+            Text(message)
+        } actions: {
+            if let actionTitle, let action {
                 Button(actionTitle, action: action)
-                    .buttonStyle(PrimaryButtonStyle())
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.large)
             }
         }
-        .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.bottom, DS.floatingTabBarClearance / 2)
     }
 }

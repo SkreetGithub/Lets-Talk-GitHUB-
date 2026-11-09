@@ -20,6 +20,7 @@ struct UnifiedSettingsView: View {
     @State private var showImportSettings = false
     @State private var isResettingPassword = false
     @State private var isDeletingAccount = false
+    @State private var accountMessage: (title: String, body: String)?
     
     var body: some View {
         NavigationView {
@@ -51,7 +52,9 @@ struct UnifiedSettingsView: View {
                 // Account Section
                 legalSection
                 accountSection
+                deleteAccountSection
             }
+            .listStyle(.insetGrouped)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
             .navigationBarItems(
@@ -76,7 +79,15 @@ struct UnifiedSettingsView: View {
                 deleteAccount()
             }
         } message: {
-            Text("This action cannot be undone. All your data will be permanently deleted.")
+            Text("This action cannot be undone. Your account, messages, contacts and call history will be permanently deleted.")
+        }
+        .alert(accountMessage?.title ?? "", isPresented: Binding(
+            get: { accountMessage != nil },
+            set: { if !$0 { accountMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(accountMessage?.body ?? "")
         }
         .alert("Reset Password", isPresented: $showResetPasswordAlert) {
             Button("Cancel", role: .cancel) { }
@@ -502,18 +513,26 @@ struct UnifiedSettingsView: View {
                 }
             }
             .buttonStyle(PlainButtonStyle())
-            
-            Button(action: { showDeleteAccountAlert = true }) {
-                HStack {
-                    Image(systemName: "trash.fill")
-                        .foregroundColor(.red)
-                        .frame(width: 24)
-                    Text("Delete Account")
-                }
-            }
-            .buttonStyle(PlainButtonStyle())
         } header: {
             Text("Account")
+        }
+    }
+    
+    // Delete Account gets its own section, in system red, with a plain-language footer.
+    private var deleteAccountSection: some View {
+        Section {
+            Button(role: .destructive, action: { showDeleteAccountAlert = true }) {
+                HStack {
+                    Label("Delete Account", systemImage: "trash.fill")
+                    Spacer()
+                    if isDeletingAccount {
+                        ProgressView()
+                    }
+                }
+            }
+            .disabled(isDeletingAccount)
+        } footer: {
+            Text("Permanently deletes your account and all of your data. This cannot be undone.")
         }
     }
     
@@ -526,13 +545,16 @@ struct UnifiedSettingsView: View {
         Task {
             do {
                 try await authManager.resetPassword(email: email)
-                DispatchQueue.main.async {
-                    self.isResettingPassword = false
+                await MainActor.run {
+                    isResettingPassword = false
+                    accountMessage = ("Check your email", "We sent a password reset link to \(email).")
+                    Haptics.success()
                 }
             } catch {
-                DispatchQueue.main.async {
-                    self.isResettingPassword = false
-                    // Handle error
+                await MainActor.run {
+                    isResettingPassword = false
+                    accountMessage = ("Couldn't send reset email", error.localizedDescription)
+                    Haptics.failure()
                 }
             }
         }
@@ -544,13 +566,12 @@ struct UnifiedSettingsView: View {
         Task {
             do {
                 try await authManager.deleteAccount()
-                DispatchQueue.main.async {
-                    self.isDeletingAccount = false
-                }
+                await MainActor.run { isDeletingAccount = false }
             } catch {
-                DispatchQueue.main.async {
-                    self.isDeletingAccount = false
-                    // Handle error
+                await MainActor.run {
+                    isDeletingAccount = false
+                    accountMessage = ("Couldn't delete account", error.localizedDescription)
+                    Haptics.failure()
                 }
             }
         }

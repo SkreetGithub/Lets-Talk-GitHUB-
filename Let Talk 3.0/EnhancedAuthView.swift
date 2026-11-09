@@ -1,21 +1,33 @@
 import SwiftUI
 
+/// The ONE sign-in / sign-up screen. Sign-up asks for name, phone, email and password
+/// (the phone number is needed for calling). Onboarding opens it in sign-up mode.
+///
+/// Navigation after auth is owned by the app root (`Let_Talk_3_0App` swaps to MainTabView
+/// when `isAuthenticated` turns true), so this screen never presents MainTabView itself.
 struct EnhancedAuthView: View {
-    @StateObject private var authManager = AuthManager.shared
-    @StateObject private var biometricAuth = BiometricAuthService.shared
-    @StateObject private var networkMonitor = NetworkMonitorService.shared
-    
-    @State private var isLoginMode = true
+    @ObservedObject private var authManager = AuthManager.shared
+    @ObservedObject private var networkMonitor = NetworkMonitorService.shared
+
+    @State private var isLoginMode: Bool
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
     @State private var name = ""
+    @State private var phone = ""
     @State private var isLoading = false
     @State private var errorMessage = ""
+    @State private var infoMessage = ""
     @State private var showPhoneVerification = false
-    @State private var showMainApp = false
-    @State private var showBiometricAlert = false
-    
+    @State private var showForgotPassword = false
+
+    /// Darker pink (about 5.4:1 on white) so the button label passes WCAG AA.
+    private static let actionPink = Color(red: 0.80, green: 0.08, blue: 0.40)
+
+    init(startInSignUp: Bool = false) {
+        _isLoginMode = State(initialValue: !startInSignUp)
+    }
+
     var body: some View {
         ZStack {
             // Background
@@ -29,271 +41,252 @@ struct EnhancedAuthView: View {
                 endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
-            
+
             ScrollView {
-                VStack(spacing: 30) {
-                    Spacer(minLength: 50)
-                    
+                VStack(spacing: DS.spacingL) {
+                    Spacer(minLength: DS.spacingXL)
+
                     // App Logo
                     Image(systemName: "globe.americas.fill")
                         .font(.system(size: 80))
+                        .symbolRenderingMode(.hierarchical)
                         .foregroundColor(.white)
-                    
-                    // Title
-                    Text("Let Talk")
-                        .font(.system(size: 36, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                    
-                    // Subtitle
-                    Text(isLoginMode ? "Welcome back!" : "Create your account")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundColor(.white.opacity(0.9))
-                    
-                    // Form
-                    VStack(spacing: 20) {
-                        if !isLoginMode {
-                            // Name field (only for registration)
-                            CustomTextField(
-                                text: $name,
-                                placeholder: "Full Name",
-                                icon: "person.fill"
-                            )
-                        }
-                        
-                        // Email field
-                        CustomTextField(
-                            text: $email,
-                            placeholder: "Email Address",
-                            icon: "envelope.fill",
-                            keyboardType: .emailAddress
-                        )
-                        
-                        // Password field
-                        CustomTextField(
-                            text: $password,
-                            placeholder: "Password",
-                            icon: "lock.fill",
-                            isSecure: true
-                        )
-                        
-                        if !isLoginMode {
-                            // Confirm password field (only for registration)
-                            CustomTextField(
-                                text: $confirmPassword,
-                                placeholder: "Confirm Password",
-                                icon: "lock.fill",
-                                isSecure: true
-                            )
-                        }
-                    }
-                    .padding(.horizontal, 30)
-                    
-                    // Error message
-                    if !errorMessage.isEmpty {
-                        Text(errorMessage)
-                            .foregroundColor(.red)
-                            .font(.system(size: 14))
-                            .padding(.horizontal, 30)
-                    }
-                    
-                    // Network status
-                    if !networkMonitor.isConnected {
-                        HStack {
-                            Image(systemName: "wifi.slash")
-                            Text("No internet connection")
-                        }
-                        .foregroundColor(.red)
-                        .font(.system(size: 14))
-                        .padding(.horizontal, 30)
-                    }
-                    
-                    // Action buttons
-                    VStack(spacing: 15) {
-                        // Main action button
-                        Button(action: handleAuthAction) {
-                            HStack {
-                                if isLoading {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        .scaleEffect(0.8)
-                                } else {
-                                    Text(isLoginMode ? "Sign In" : "Create Account")
-                                        .font(.system(size: 18, weight: .semibold))
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(
-                                RoundedRectangle(cornerRadius: 25)
-                                    .fill(Color.white.opacity(0.2))
-                            )
+                        .accessibilityHidden(true)
+
+                    VStack(spacing: DS.spacingS) {
+                        Text("Let Talk")
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
+
+                        Text(isLoginMode ? "Welcome back!" : "Create your account")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.white.opacity(0.9))
+                            .contentTransition(.opacity)
+                    }
+
+                    // Form
+                    VStack(spacing: DS.spacingM) {
+                        if !isLoginMode {
+                            CustomTextField(text: $name, placeholder: "Full Name", icon: "person.fill")
+                                .textContentType(.name)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+
+                            CustomTextField(text: $phone, placeholder: "Phone Number", icon: "phone.fill",
+                                            keyboardType: .phonePad)
+                                .textContentType(.telephoneNumber)
+                                .transition(.move(edge: .top).combined(with: .opacity))
                         }
-                        .disabled(isLoading || !networkMonitor.isConnected)
-                        
-                        // Biometric authentication (only for login)
-                        if isLoginMode && biometricAuth.isBiometricAvailable {
-                            Button(action: authenticateWithBiometrics) {
-                                HStack {
-                                    Image(systemName: biometricAuth.biometricType == .faceID ? "faceid" : "touchid")
-                                    Text("Sign in with \(biometricAuth.biometricTypeString)")
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 25)
-                                        .fill(Color.white.opacity(0.1))
-                                )
-                                .foregroundColor(.white)
+
+                        CustomTextField(text: $email, placeholder: "Email Address", icon: "envelope.fill",
+                                        keyboardType: .emailAddress)
+                            .textContentType(.emailAddress)
+
+                        CustomTextField(text: $password, placeholder: "Password", icon: "lock.fill", isSecure: true)
+                            .textContentType(isLoginMode ? .password : .newPassword)
+
+                        if !isLoginMode {
+                            CustomTextField(text: $confirmPassword, placeholder: "Confirm Password",
+                                            icon: "lock.fill", isSecure: true)
+                                .textContentType(.newPassword)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                    }
+
+                    // Messages (white text on a tinted pill: red text on the pink gradient was unreadable)
+                    if !errorMessage.isEmpty {
+                        messagePill(errorMessage, icon: "exclamationmark.circle.fill", tint: .red)
+                    }
+                    if !infoMessage.isEmpty {
+                        messagePill(infoMessage, icon: "envelope.badge.fill", tint: .green)
+                    }
+                    if !networkMonitor.isConnected {
+                        messagePill("No internet connection", icon: "wifi.slash", tint: .red)
+                    }
+
+                    // Action buttons
+                    VStack(spacing: DS.spacingM) {
+                        Button(action: handleAuthAction) {
+                            ZStack {
+                                Text(isLoginMode ? "Sign In" : "Create Account")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundColor(Self.actionPink)
+                                    .opacity(isLoading ? 0 : 1)
+                                ProgressView()
+                                    .tint(Self.actionPink)
+                                    .opacity(isLoading ? 1 : 0)
                             }
-                            .disabled(isLoading)
+                            .animation(.easeInOut(duration: 0.2), value: isLoading)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: DS.primaryButtonHeight)
+                            .background(RoundedRectangle(cornerRadius: 25).fill(Color.white))
+                            .contentShape(RoundedRectangle(cornerRadius: 25))
                         }
-                        
+                        .buttonStyle(PressableStyle())
+                        .disabled(isLoading || !networkMonitor.isConnected)
+                        .opacity(isLoading || !networkMonitor.isConnected ? 0.7 : 1)
+
                         AppleSignInButton(
                             label: isLoginMode ? .signIn : .signUp,
                             onSuccess: handleAppleSignInSuccess,
-                            onError: { message in errorMessage = message }
+                            onError: { message in
+                                errorMessage = message
+                                Haptics.failure()
+                            }
                         )
                         .disabled(isLoading || !networkMonitor.isConnected)
 
-                        // Toggle mode button
+                        if isLoginMode {
+                            Button("Forgot password?") { showForgotPassword = true }
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(.white)
+                                .frame(minHeight: DS.minTapTarget)
+                        }
+
                         Button(action: toggleMode) {
                             Text(isLoginMode ? "Don't have an account? Sign Up" : "Already have an account? Sign In")
                                 .font(.system(size: 16))
-                                .foregroundColor(.white.opacity(0.8))
+                                .foregroundColor(.white.opacity(0.9))
+                                .frame(minHeight: DS.minTapTarget)
                         }
 
-                        VStack(spacing: 4) {
+                        VStack(spacing: DS.spacingXS) {
                             Text("By continuing you agree to our")
                                 .font(.footnote)
-                                .foregroundColor(.white.opacity(0.7))
+                                .foregroundColor(.white.opacity(0.8))
                             LegalLinksView()
                                 .tint(.white)
                         }
                     }
-                    .padding(.horizontal, 30)
-                    
-                    Spacer(minLength: 50)
+
+                    Spacer(minLength: DS.spacingXL)
                 }
+                .padding(.horizontal, DS.spacingL)   // one inset for fields, messages and buttons
             }
+            .scrollDismissesKeyboard(.interactively)
+        }
+        .sheet(isPresented: $showForgotPassword) {
+            ForgotPasswordView()
         }
         .fullScreenCover(isPresented: $showPhoneVerification) {
-            PhoneVerificationView(
-                isPresented: $showPhoneVerification,
-                isLoggedIn: $showMainApp
-            )
-            .environmentObject(authManager)
+            PhoneVerificationView(isPresented: $showPhoneVerification, isLoggedIn: .constant(false))
+                .environmentObject(authManager)
         }
-        .fullScreenCover(isPresented: $showMainApp) {
-            MainTabView()
-        }
-        .alert("Biometric Authentication", isPresented: $showBiometricAlert) {
-            Button("OK") { }
-        } message: {
-            Text("Biometric authentication is not available on this device.")
+        // A signed-in user without a phone number (e.g. Sign in with Apple) picks one next.
+        .onAppear { showPhoneVerification = authManager.needsPhoneVerification }
+        .onChange(of: authManager.needsPhoneVerification) { _, needsPhone in
+            showPhoneVerification = needsPhone
         }
     }
-    
+
+    private func messagePill(_ text: String, icon: String, tint: Color) -> some View {
+        Label(text, systemImage: icon)
+            .font(.footnote.weight(.semibold))
+            .foregroundColor(.white)
+            .padding(.horizontal, DS.spacingM)
+            .padding(.vertical, DS.spacingS)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: DS.cornerRadiusS).fill(tint.opacity(0.75)))
+            .transition(.opacity)
+    }
+
     private func handleAuthAction() {
         guard networkMonitor.isConnected else {
-            errorMessage = "Please check your internet connection"
+            errorMessage = "Please check your internet connection."
+            Haptics.failure()
             return
         }
-        
-        guard validateInputs() else { return }
-        
+        guard validateInputs() else {
+            Haptics.failure()
+            return
+        }
+
         isLoading = true
         errorMessage = ""
-        
+        infoMessage = ""
+
         Task {
             do {
                 if isLoginMode {
                     try await authManager.signIn(email: email, password: password)
+                    await MainActor.run { Haptics.success() }
                 } else {
-                    try await authManager.signUp(email: email, password: password, name: name)
-                }
-                
-                await MainActor.run {
-                    isLoading = false
-                    if isLoginMode {
-                        // For login, check if user needs phone verification
-                        if authManager.needsPhoneVerification {
-                            showPhoneVerification = true
-                        } else {
-                            showMainApp = true
+                    let signedIn = try await authManager.signUp(
+                        email: email.trimmingCharacters(in: .whitespaces),
+                        password: password,
+                        name: name.trimmingCharacters(in: .whitespaces),
+                        phone: normalizedPhone
+                    )
+                    await MainActor.run {
+                        Haptics.success()
+                        if !signedIn {
+                            // Email confirmation is on in Supabase.
+                            infoMessage = "Check your email to confirm your account, then sign in."
+                            withAnimation(DS.screenTransition) { isLoginMode = true }
                         }
-                    } else {
-                        // For sign up, always show phone verification
-                        showPhoneVerification = true
                     }
                 }
+                await MainActor.run { isLoading = false }
             } catch {
                 await MainActor.run {
                     isLoading = false
-                    errorMessage = error.localizedDescription
+                    let nsError = error as NSError
+                    errorMessage = nsError.domain == NSURLErrorDomain
+                        ? "Sign up failed: Please check your internet connection."
+                        : error.localizedDescription
+                    Haptics.failure()
                 }
             }
-        }
-    }
-    
-    private func authenticateWithBiometrics() {
-        Task {
-            do {
-                try await biometricAuth.authenticateWithBiometrics()
-                await MainActor.run {
-                    showMainApp = true
-                }
-            } catch {
-                await MainActor.run {
-                    showBiometricAlert = true
-                }
-            }
-        }
-    }
-    
-    private func handleAppleSignInSuccess() {
-        if authManager.needsPhoneVerification {
-            showPhoneVerification = true
-        } else {
-            showMainApp = true
         }
     }
 
+    private func handleAppleSignInSuccess() {
+        Haptics.success()
+        showPhoneVerification = authManager.needsPhoneVerification
+    }
+
     private func toggleMode() {
-        withAnimation {
+        withAnimation(DS.screenTransition) {
             isLoginMode.toggle()
             errorMessage = ""
+            infoMessage = ""
         }
     }
-    
+
+    /// Digits only, keeping a leading "+" for international numbers.
+    private var normalizedPhone: String {
+        let trimmed = phone.trimmingCharacters(in: .whitespaces)
+        let digits = trimmed.filter(\.isNumber)
+        return trimmed.hasPrefix("+") ? "+" + digits : digits
+    }
+
     private func validateInputs() -> Bool {
         if email.isEmpty || password.isEmpty {
-            errorMessage = "Please fill in all required fields"
+            errorMessage = "Please fill in all required fields."
             return false
         }
-        
-        if !isLoginMode {
-            if name.isEmpty {
-                errorMessage = "Please enter your name"
-                return false
-            }
-            
-            if password != confirmPassword {
-                errorMessage = "Passwords do not match"
-                return false
-            }
-            
-            if password.count < 6 {
-                errorMessage = "Password must be at least 6 characters"
-                return false
-            }
-        }
-        
         if !email.contains("@") {
-            errorMessage = "Please enter a valid email address"
+            errorMessage = "Please enter a valid email address."
             return false
         }
-        
+        if !isLoginMode {
+            if name.trimmingCharacters(in: .whitespaces).isEmpty {
+                errorMessage = "Please enter your name."
+                return false
+            }
+            let digitCount = normalizedPhone.filter(\.isNumber).count
+            if digitCount < 10 || digitCount > 15 {
+                errorMessage = "Please enter a valid phone number."
+                return false
+            }
+            if password.count < 6 {
+                errorMessage = "Password must be at least 6 characters."
+                return false
+            }
+            if password != confirmPassword {
+                errorMessage = "Passwords don't match."
+                return false
+            }
+        }
         return true
     }
 }
@@ -312,15 +305,17 @@ struct CustomTextField: View {
                 .frame(width: 20)
             
             if isSecure {
-                SecureField(placeholder, text: $text)
+                SecureField("", text: $text, prompt: Text(placeholder).foregroundColor(.white.opacity(0.7)))
                     .textFieldStyle(PlainTextFieldStyle())
                     .foregroundColor(.white)
                     .keyboardType(keyboardType)
             } else {
-                TextField(placeholder, text: $text)
+                TextField("", text: $text, prompt: Text(placeholder).foregroundColor(.white.opacity(0.7)))
                     .textFieldStyle(PlainTextFieldStyle())
                     .foregroundColor(.white)
                     .keyboardType(keyboardType)
+                    .textInputAutocapitalization(keyboardType == .emailAddress ? .never : nil)
+                    .autocorrectionDisabled(keyboardType == .emailAddress)
             }
         }
         .padding(.vertical, 16)

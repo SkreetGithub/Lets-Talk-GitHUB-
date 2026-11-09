@@ -30,7 +30,7 @@ struct ProfessionalTranslatorView: View {
             
             // Main Content
             ScrollView {
-                VStack(spacing: 24) {
+                VStack(spacing: DS.spacingL) {
                     // Professional Header
                     UnifiedHeader(
                         title: "AI Translator",
@@ -92,8 +92,8 @@ struct ProfessionalTranslatorView: View {
                         }
                     )
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 100)
+                .padding(.horizontal, DS.spacingM)
+                .padding(.bottom, 140)   // clears the floating tab bar + page dots so the last card can scroll fully into view
             }
         }
         .dismissKeyboardOnTap()

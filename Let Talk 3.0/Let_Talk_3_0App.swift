@@ -65,6 +65,8 @@ struct Let_Talk_3_0App: App {
                         
                         if !hasCompletedOnboarding {
                             OnboardingView()
+                                .environmentObject(authManager)
+                                .environmentObject(settingsManager)
                         } else {
                             EnhancedAuthView()
                                 .environmentObject(authManager)

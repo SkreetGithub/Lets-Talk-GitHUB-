@@ -24,7 +24,6 @@ struct ChatDetailView: View {
         VStack(spacing: 0) {
             chatHeader
             messagesList
-            messageInputBar
         }
         .navigationBarHidden(true)
         .onAppear {
@@ -77,7 +76,7 @@ struct ChatDetailView: View {
     private var messagesList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: DS.spacingS) {
                     ForEach(viewModel.messageGroups.keys.sorted(), id: \.self) { date in
                         Section(header: DateHeader(date: date)) {
                             ForEach(viewModel.messageGroups[date] ?? []) { message in
@@ -91,16 +90,23 @@ struct ChatDetailView: View {
                         }
                     }
                 }
-                .padding(.horizontal)
-                .padding(.top)
+                .padding(.horizontal, DS.spacingM)
+                .padding(.vertical, DS.spacingS)
             }
-            .onChange(of: viewModel.messages) { oldValue, newValue in
-                if scrollToBottom {
-                    withAnimation {
-                        proxy.scrollTo(viewModel.messages.last?.id, anchor: .bottom)
-                    }
-                    scrollToBottom = false
+            .defaultScrollAnchor(.bottom)                 // open on the newest message, not the oldest
+            .scrollDismissesKeyboard(.interactively)
+            // Composer lives in the bottom safe area: it rides on top of the keyboard with the
+            // system's own keyboard animation, and the last message is never hidden behind it.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                messageInputBar
+            }
+            .onChange(of: viewModel.messages.count) { _, _ in
+                // Scroll for sent AND received messages (it used to scroll only after Send).
+                guard let lastId = viewModel.messages.last?.id else { return }
+                withAnimation(.easeOut(duration: 0.25)) {
+                    proxy.scrollTo(lastId, anchor: .bottom)
                 }
+                scrollToBottom = false
             }
         }
     }
@@ -125,11 +131,13 @@ struct ChatHeader: View {
     let onBack: () -> Void
     
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: DS.spacingS) {
             Button(action: onBack) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 20, weight: .semibold))
+                    .frame(width: DS.minTapTarget, height: DS.minTapTarget, alignment: .leading)
             }
+            .accessibilityLabel("Back")
             
             ProfileImageView(imageURL: contact.imageURL,
                            placeholderText: contact.initials)
@@ -155,17 +163,23 @@ struct ChatHeader: View {
             Button(action: onAudioCall) {
                 Image(systemName: "phone")
                     .font(.system(size: 20))
+                    .frame(width: DS.minTapTarget, height: DS.minTapTarget)
             }
+            .accessibilityLabel("Voice call")
             
             Button(action: onVideoCall) {
                 Image(systemName: "video")
                     .font(.system(size: 20))
+                    .frame(width: DS.minTapTarget, height: DS.minTapTarget)
             }
+            .accessibilityLabel("Video call")
 
             UserSafetyMenu(userId: contact.id, userName: contact.name)
                 .font(.system(size: 20))
+                .frame(width: DS.minTapTarget, height: DS.minTapTarget)
         }
-        .padding()
+        .padding(.horizontal, DS.spacingS)
+        .padding(.vertical, DS.spacingXS)
         .background(Color(.systemBackground))
         .shadow(radius: 1)
     }
@@ -183,12 +197,22 @@ struct MessageBubble: View {
     @Binding var messageToTranslate: Message?
     
     var body: some View {
+        if message.type == .system {
+            // System notices are centered, not drawn as a sent/received bubble.
+            systemContent
+                .frame(maxWidth: .infinity)
+        } else {
+            bubbleRow
+        }
+    }
+    
+    private var bubbleRow: some View {
         HStack {
             if message.isOutgoing {
-                Spacer()
+                Spacer(minLength: 48)   // bubbles stop ~48pt short of the far edge, like Messages
             }
             
-            VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: 4) {
+            VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: DS.spacingXS) {
                 switch message.type {
                 case .text:
                     textContent
@@ -208,28 +232,42 @@ struct MessageBubble: View {
                     systemContent
                 }
                 
-                HStack(spacing: 4) {
+                HStack(spacing: DS.spacingXS) {
                     Text(message.formattedTime)
                         .font(.caption2)
-                        .foregroundColor(.gray)
+                        .foregroundColor(message.isOutgoing ? .white.opacity(0.8) : .secondary)
                     
                     if message.isOutgoing {
+                        // Was blue on the blue bubble (invisible).
                         Image(systemName: statusIcon)
                             .font(.caption2)
-                            .foregroundColor(message.status == .failed ? .red : .blue)
+                            .foregroundColor(.white.opacity(message.status == .failed ? 1 : 0.8))
+                            .accessibilityLabel(statusText)
                     }
                 }
             }
-            .padding(10)
+            .padding(.horizontal, 12)
+            .padding(.vertical, DS.spacingS)
             .background(bubbleBackground)
-            .cornerRadius(16)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .contextMenu {
                 messageContextMenu
             }
             
             if !message.isOutgoing {
-                Spacer()
+                Spacer(minLength: 48)
             }
+        }
+        .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+    }
+    
+    private var statusText: String {
+        switch message.status {
+        case .sending: return "Sending"
+        case .sent: return "Sent"
+        case .delivered: return "Delivered"
+        case .read: return "Read"
+        case .failed: return "Failed to send"
         }
     }
     
@@ -259,8 +297,8 @@ struct MessageBubble: View {
     
     private var videoContent: some View {
         Group {
-            if let url = message.attachments?.first?.url {
-                VideoThumbnail(url: URL(string: url)!)
+            if let string = message.attachments?.first?.url, let url = URL(string: string) {
+                VideoThumbnail(url: url)
                     .frame(width: 200, height: 150)
                     .cornerRadius(8)
             } else {
@@ -271,8 +309,8 @@ struct MessageBubble: View {
     
     private var audioContent: some View {
         Group {
-            if let url = message.attachments?.first?.url {
-                AudioPlayer(url: URL(string: url)!)
+            if let string = message.attachments?.first?.url, let url = URL(string: string) {
+                AudioPlayer(url: url)
                     .frame(width: 200, height: 50)
             } else {
                 EmptyView()
@@ -316,7 +354,8 @@ struct MessageBubble: View {
     
     private var contactContent: some View {
         Group {
-            if let contact = try? JSONDecoder().decode(Contact.self, from: message.content.data(using: .utf8)!) {
+            if let data = message.content.data(using: .utf8),
+               let contact = try? JSONDecoder().decode(Contact.self, from: data) {
                 HStack {
                     Image(systemName: "person.circle")
                     VStack(alignment: .leading) {
@@ -387,20 +426,7 @@ struct MessageBubble: View {
                     Label("Translate", systemImage: "text.bubble")
                 }
             }
-            
-            if message.isOutgoing && message.status == .failed {
-                Button(action: {
-                    // Implement retry logic
-                }) {
-                    Label("Retry", systemImage: "arrow.clockwise")
-                }
-            }
-            
-            Button(role: .destructive, action: {
-                // Implement delete logic
-            }) {
-                Label("Delete", systemImage: "trash")
-            }
+            // "Retry" and "Delete" were removed: they had no implementation (tapping did nothing).
         }
     }
     
@@ -420,41 +446,68 @@ struct MessageInputBar: View {
     @FocusState private var isFocused: Bool
     
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .bottom, spacing: DS.spacingS) {
             Button(action: onAttachment) {
-                Image(systemName: "plus.circle")
-                    .font(.system(size: 24))
+                Image(systemName: "plus")
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.blue)
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(Color(.systemGray6)))
             }
+            .buttonStyle(PressableStyle())
+            .accessibilityLabel("Add attachment")
             
-            if isRecording {
-                recordingView
-            } else {
-                textInputView
+            Group {
+                if isRecording {
+                    recordingView
+                } else {
+                    textInputView
+                }
             }
+            .animation(.easeInOut(duration: 0.2), value: isRecording)
             
             Button(action: {
-                if text.isEmpty {
+                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     isRecording.toggle()
                 } else {
                     onSend()
                 }
             }) {
-                Image(systemName: text.isEmpty ? (isRecording ? "stop.circle.fill" : "mic.circle.fill") : "arrow.up.circle.fill")
-                    .font(.system(size: 24))
+                Image(systemName: hasText ? "arrow.up.circle.fill" : (isRecording ? "stop.circle.fill" : "mic.circle.fill"))
+                    .font(.system(size: 32))
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundColor(isRecording ? .red : .blue)
+                    .contentTransition(.symbolEffect(.replace))
             }
+            .buttonStyle(PressableStyle())
+            .accessibilityLabel(hasText ? "Send" : (isRecording ? "Stop recording" : "Record voice message"))
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(Color(.systemBackground))
-        .shadow(radius: 1)
+        .padding(.horizontal, DS.spacingM)
+        .padding(.vertical, DS.spacingS)
+        .background(.bar)                                 // system blur, like Messages
+        .overlay(alignment: .top) { Divider() }
+    }
+    
+    private var hasText: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
     
     private var textInputView: some View {
-        TextField("Message", text: $text)
-            .textFieldStyle(.roundedBorder)
+        // Grows up to 5 lines as you type, then scrolls.
+        TextField("Message", text: $text, axis: .vertical)
+            .lineLimit(1...5)
             .focused($isFocused)
+            .padding(.horizontal, 12)
+            .padding(.vertical, DS.spacingS)
+            .frame(minHeight: 36)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color(.systemGray6))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color(.separator), lineWidth: 0.5)
+            )
     }
     
     private var recordingView: some View {

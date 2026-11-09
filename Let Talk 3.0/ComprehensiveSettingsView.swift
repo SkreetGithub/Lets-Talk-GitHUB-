@@ -1,10 +1,12 @@
 import SwiftUI
 
 struct ComprehensiveSettingsView: View {
+    @Environment(\.dismiss) private var dismissSettings
     @EnvironmentObject var settingsManager: SettingsManager
     @EnvironmentObject var authManager: AuthManager
     @State private var showSignOutAlert = false
     @State private var showDeleteAccountAlert = false
+    @State private var deleteErrorMessage: String?
     @State private var showExportSettings = false
     @State private var showImportSettings = false
     @State private var showThemePreview = false
@@ -39,9 +41,17 @@ struct ComprehensiveSettingsView: View {
                 // Account Section
                 legalSection
                 accountSection
+                deleteAccountSection
             }
+            .listStyle(.insetGrouped)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                // This screen is presented as a sheet from Chats and had no way to close it.
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismissSettings() }
+                }
+            }
         }
         .alert("Sign Out", isPresented: $showSignOutAlert) {
             Button("Cancel", role: .cancel) { }
@@ -57,11 +67,20 @@ struct ComprehensiveSettingsView: View {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
                 Task {
-                    try await authManager.deleteAccount()
+                    do {
+                        try await authManager.deleteAccount()
+                    } catch {
+                        deleteErrorMessage = error.localizedDescription
+                    }
                 }
             }
         } message: {
-            Text("This action cannot be undone. All your data will be permanently deleted.")
+            Text("This action cannot be undone. Your account, messages, contacts and call history will be permanently deleted.")
+        }
+        .alert("Couldn't delete account", isPresented: Binding(get: { deleteErrorMessage != nil }, set: { if !$0 { deleteErrorMessage = nil } })) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(deleteErrorMessage ?? "")
         }
     }
     
@@ -532,17 +551,26 @@ struct ComprehensiveSettingsView: View {
     // MARK: - Account Section
     private var accountSection: some View {
         Section {
-            Button("Sign Out") {
+            Button(role: .destructive) {
                 showSignOutAlert = true
+            } label: {
+                Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
             }
-            .foregroundColor(.red)
-            
-            Button("Delete Account") {
-                showDeleteAccountAlert = true
-            }
-            .foregroundColor(.red)
         } header: {
             Text("Account")
+        }
+    }
+    
+    // Delete Account gets its own section, in system red, with a plain-language footer.
+    private var deleteAccountSection: some View {
+        Section {
+            Button(role: .destructive) {
+                showDeleteAccountAlert = true
+            } label: {
+                Label("Delete Account", systemImage: "trash.fill")
+            }
+        } footer: {
+            Text("Permanently deletes your account and all of your data. This cannot be undone.")
         }
     }
 }

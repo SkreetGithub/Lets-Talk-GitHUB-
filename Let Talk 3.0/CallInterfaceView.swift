@@ -14,6 +14,7 @@ struct CallInterfaceView: View {
     @State private var callDuration: TimeInterval = 0
     @State private var callTimer: Timer?
     @StateObject private var liveTranslation = LiveTranslationSession.shared
+    @State private var otherPartyName: String?
     
     let call: Call
     let isIncoming: Bool
@@ -29,13 +30,9 @@ struct CallInterfaceView: View {
             // Call Info Overlay
             callInfoOverlay
 
-            // Live translation subtitles
-            SubtitleOverlay(session: liveTranslation)
-            
-            // Controls Overlay
-            if showControls {
-                controlsOverlay
-            }
+            // Subtitles + controls share one bottom stack so they can never overlap.
+            // The end-call / answer / decline row is always visible; secondary controls auto-hide.
+            controlsOverlay
             
             // Status Overlay
             statusOverlay
@@ -49,17 +46,19 @@ struct CallInterfaceView: View {
             stopTimers()
             liveTranslation.stop()
         }
+        .task {
+            // Show the other person's name, not their raw user ID.
+            otherPartyName = try? await DatabaseManager.shared.getUser(id: otherPartyId).name
+        }
+        .onTapGesture {
+            toggleControls()
+        }
         .onChange(of: callManager.callStatus) { _, status in
             if status == .connected {
                 liveTranslation.start()
             } else if status == .ending || status == .idle {
                 liveTranslation.stop()
             }
-        }
-        .onTapGesture {
-            toggleControls()
-        }
-        .onChange(of: callManager.callStatus) { oldValue, status in
             handleCallStatusChange(status)
         }
     }
@@ -79,14 +78,20 @@ struct CallInterfaceView: View {
             
             // Local video (picture-in-picture)
             if call.isVideo && callManager.isVideoEnabled {
+                // Anchored top-right BELOW the name/status row (it used to sit on top of the
+                // connection indicator and translation chip at a fixed screen position).
                 LocalVideoView(localVideoView: $localVideoView)
-                    .frame(width: 120, height: 160)
-                    .cornerRadius(12)
+                    .frame(width: 110, height: 150)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.cornerRadiusS, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.white, lineWidth: 2)
+                        RoundedRectangle(cornerRadius: DS.cornerRadiusS, style: .continuous)
+                            .stroke(Color.white.opacity(0.8), lineWidth: 1.5)
                     )
-                    .position(x: UIScreen.main.bounds.width - 80, y: 100)
+                    .shadow(color: .black.opacity(0.4), radius: 8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.top, 110)
+                    .padding(.trailing, DS.spacingM)
+                    .accessibilityLabel("Your camera preview")
             }
         }
     }
@@ -97,10 +102,12 @@ struct CallInterfaceView: View {
         VStack {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(call.calleeId == authManager.currentUserId ? call.callerId : call.calleeId)
+                    Text(otherPartyName ?? "Let Talk user")
                         .font(.title2)
                         .fontWeight(.semibold)
                         .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     
                     Text(call.isVideo ? "Video Call" : "Voice Call")
                         .font(.subheadline)
@@ -121,8 +128,8 @@ struct CallInterfaceView: View {
                     LiveTranslationChip(session: liveTranslation)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 60)
+            .padding(.horizontal, DS.spacingL)
+            .padding(.top, DS.spacingM)          // safe area already clears the Dynamic Island
             
             Spacer()
         }
@@ -131,53 +138,58 @@ struct CallInterfaceView: View {
     // MARK: - Controls Overlay
     
     private var controlsOverlay: some View {
-        VStack {
+        VStack(spacing: DS.spacingL) {
             Spacer()
             
-            // Call controls
-            HStack(spacing: 40) {
-                // Mute button
-                CallControlButton(
-                    icon: callManager.isAudioEnabled ? "mic.fill" : "mic.slash.fill",
-                    color: .white,
-                    backgroundColor: callManager.isAudioEnabled ? .white.opacity(0.2) : .red,
-                    action: { callManager.toggleAudio() }
-                )
-                
-                // Video button (only for video calls)
-                if call.isVideo {
-                    CallControlButton(
-                        icon: callManager.isVideoEnabled ? "video.fill" : "video.slash.fill",
-                        color: .white,
-                        backgroundColor: callManager.isVideoEnabled ? .white.opacity(0.2) : .red,
-                        action: { callManager.toggleVideo() }
-                    )
-                }
-                
-                // Speaker button
-                CallControlButton(
-                    icon: callManager.isSpeakerEnabled ? "speaker.wave.3.fill" : "speaker.fill",
-                    color: .white,
-                    backgroundColor: callManager.isSpeakerEnabled ? .blue : .white.opacity(0.2),
-                    action: { callManager.toggleSpeaker() }
-                )
-                
-                // Camera switch (only for video calls)
-                if call.isVideo {
-                    CallControlButton(
-                        icon: "camera.rotate.fill",
-                        color: .white,
-                        backgroundColor: .white.opacity(0.2),
-                        action: { callManager.switchCamera() }
-                    )
-                }
-            }
-            .padding(.bottom, 40)
+            // Live translation subtitles sit directly above the controls
+            SubtitleOverlay(session: liveTranslation)
             
-            // Main action button
+            // Secondary controls (auto-hide)
+            if showControls {
+                HStack(spacing: 0) {
+                    CallControlButton(
+                        icon: callManager.isAudioEnabled ? "mic.fill" : "mic.slash.fill",
+                        color: .white,
+                        backgroundColor: callManager.isAudioEnabled ? .white.opacity(0.2) : .red,
+                        action: { callManager.toggleAudio() }
+                    )
+                    .frame(maxWidth: .infinity)   // equal share of the row: evenly spaced
+                    
+                    if call.isVideo {
+                        CallControlButton(
+                            icon: callManager.isVideoEnabled ? "video.fill" : "video.slash.fill",
+                            color: .white,
+                            backgroundColor: callManager.isVideoEnabled ? .white.opacity(0.2) : .red,
+                            action: { callManager.toggleVideo() }
+                        )
+                    .frame(maxWidth: .infinity)   // equal share of the row: evenly spaced
+                    }
+                    
+                    CallControlButton(
+                        icon: callManager.isSpeakerEnabled ? "speaker.wave.3.fill" : "speaker.fill",
+                        color: .white,
+                        backgroundColor: callManager.isSpeakerEnabled ? .blue : .white.opacity(0.2),
+                        action: { callManager.toggleSpeaker() }
+                    )
+                    .frame(maxWidth: .infinity)   // equal share of the row: evenly spaced
+                    
+                    if call.isVideo {
+                        CallControlButton(
+                            icon: "camera.rotate.fill",
+                            color: .white,
+                            backgroundColor: .white.opacity(0.2),
+                            action: { callManager.switchCamera() }
+                        )
+                    .frame(maxWidth: .infinity)   // equal share of the row: evenly spaced
+                    }
+                }
+                .padding(.horizontal, DS.spacingL)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+            
+            // Main action row (always visible)
             HStack(spacing: 60) {
                 if isIncoming && callManager.callStatus == .incoming {
-                    // Answer button
                     CallControlButton(
                         icon: "phone.fill",
                         color: .white,
@@ -186,7 +198,6 @@ struct CallInterfaceView: View {
                         action: { answerCall() }
                     )
                     
-                    // Decline button
                     CallControlButton(
                         icon: "phone.down.fill",
                         color: .white,
@@ -195,7 +206,6 @@ struct CallInterfaceView: View {
                         action: { declineCall() }
                     )
                 } else {
-                    // End call button
                     CallControlButton(
                         icon: "phone.down.fill",
                         color: .white,
@@ -205,32 +215,36 @@ struct CallInterfaceView: View {
                     )
                 }
             }
-            .padding(.bottom, 60)
+            .padding(.bottom, DS.spacingXL)
         }
+        .animation(.easeInOut(duration: 0.3), value: showControls)
     }
     
     // MARK: - Status Overlay
     
     private var statusOverlay: some View {
         VStack {
+            Spacer()
             if callManager.callStatus != .connected && callManager.callStatus != .idle {
-                HStack {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        .scaleEffect(0.8)
-                    
+                HStack(spacing: DS.spacingS) {
+                    if callManager.callStatus != .failed && callManager.callStatus != .disconnected {
+                        ProgressView()
+                            .tint(.white)
+                    }
                     Text(statusText)
                         .font(.headline)
                         .foregroundColor(.white)
                 }
-                .padding()
-                .background(Color.black.opacity(0.6))
-                .cornerRadius(20)
+                .padding(.horizontal, DS.spacingL)
+                .padding(.vertical, DS.spacingM)
+                .background(Capsule().fill(Color.black.opacity(0.6)))
+                .transition(.opacity)
             }
-            
             Spacer()
+            Spacer()   // sits a little above center, clear of the controls
         }
-        .padding(.top, 200)
+        .allowsHitTesting(false)
+        .animation(.easeInOut(duration: 0.25), value: callManager.callStatus)
     }
     
     // MARK: - Connection Status Indicator
@@ -317,6 +331,7 @@ struct CallInterfaceView: View {
     }
     
     private func declineCall() {
+        Haptics.tap()
         Task {
             await callManager.rejectCall()
             presentationMode.wrappedValue.dismiss()
@@ -324,6 +339,7 @@ struct CallInterfaceView: View {
     }
     
     private func endCall() {
+        Haptics.tap()
         Task {
             await callManager.endCall()
             presentationMode.wrappedValue.dismiss()
@@ -372,6 +388,16 @@ struct CallInterfaceView: View {
     
     private func handleCallStatusChange(_ status: WebRTCCallStatus) {
         switch status {
+        case .connected:
+            Haptics.success()
+        case .failed:
+            Haptics.failure()
+        case .ended:
+            Haptics.warning()
+        default:
+            break
+        }
+        switch status {
         case .ended, .failed:
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 presentationMode.wrappedValue.dismiss()
@@ -379,6 +405,10 @@ struct CallInterfaceView: View {
         default:
             break
         }
+    }
+    
+    private var otherPartyId: String {
+        call.calleeId == authManager.currentUserId ? call.callerId : call.calleeId
     }
     
     private func formatDuration(_ duration: TimeInterval) -> String {

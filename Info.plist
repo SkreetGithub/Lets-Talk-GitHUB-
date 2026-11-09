@@ -72,5 +72,9 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSContactsUsageDescription</key>
+	<string>Let Talk uses your contacts so you can find and call people you know.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Let Talk uses your location only when you choose to share it in a chat.</string>
 </dict>
 </plist>

@@ -96,23 +96,12 @@ struct MainTabView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
+            // Standard inline title, centered by the system. Chats has its own large-title
+            // NavigationView, so the outer bar hides there instead of stacking two bars.
+            .navigationTitle(selectedTab.title)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    HStack {
-                        Text(selectedTab.title)
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                        
-                        Spacer()
-                        
-                        // Tab-specific actions
-                        HStack(spacing: 16) {
-                            tabSpecificActions
-                        }
-                    }
-                }
-            }
+            .toolbar(selectedTab == .chats ? .hidden : .visible, for: .navigationBar)
+            .animation(DS.screenTransition, value: selectedTab)
         }
         .accentColor(.blue)
         .onAppear {
@@ -143,44 +132,6 @@ struct MainTabView: View {
     }
     
     // MARK: - Tab-Specific Actions
-    @ViewBuilder
-    private var tabSpecificActions: some View {
-        switch selectedTab {
-        case .chats:
-            Button(action: { showNewChat = true }) {
-                Image(systemName: "square.and.pencil")
-                    .font(.system(size: 16, weight: .medium))
-            }
-            
-        case .calls:
-            Button(action: { 
-                // Show dialpad for calls
-                // This will be handled by the CallsView
-            }) {
-                Image(systemName: "phone.circle.fill")
-                    .font(.system(size: 16, weight: .medium))
-            }
-            
-        case .contacts:
-            Button(action: { 
-                // Show add contact
-                // This will be handled by the ContactsView
-            }) {
-                Image(systemName: "person.badge.plus")
-                    .font(.system(size: 16, weight: .medium))
-            }
-            
-        case .translator:
-            Button(action: { 
-                // Show language selector
-                // This will be handled by the ProfessionalTranslatorView
-            }) {
-                Image(systemName: "globe")
-                    .font(.system(size: 16, weight: .medium))
-            }
-        }
-    }
-    
     // MARK: - Helper Methods
     private func setupInitialState() {
         // Set up initial state based on user preferences

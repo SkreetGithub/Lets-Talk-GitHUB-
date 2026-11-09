@@ -16,11 +16,8 @@ final class SupabaseSignalingService: ObservableObject {
     private var processedMessageIdsByCall: [String: Set<String>] = [:]
     private var incomingCallsTimer: Timer?
 
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        return d
-    }()
+    // .iso8601 rejects Supabase's fractional seconds ("...04.174123+00:00"), so rows failed to decode.
+    private let decoder: JSONDecoder = PostgresDate.decoder
 
     private init() {}
 

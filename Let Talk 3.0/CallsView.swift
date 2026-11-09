@@ -25,11 +25,15 @@ struct CallsView: View {
                     Spacer()
                     Button(action: { showDialpad = true }) {
                         Image(systemName: "phone.circle.fill")
-                            .font(.system(size: 50))
-                            .foregroundColor(.blue)
-                            .shadow(radius: 3)
+                            .font(.system(size: 56))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, .blue)
+                            .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
                     }
-                    .padding(.bottom, 100) // Add bottom padding to avoid tab bar
+                    .buttonStyle(PressableStyle())
+                    .accessibilityLabel("Open dial pad")
+                    .padding(.trailing, DS.spacingL)          // was flush against the screen edge
+                    .padding(.bottom, DS.floatingTabBarClearance)
                 }
             }
         }
@@ -75,6 +79,7 @@ struct CallsView: View {
             }
         }
         .listStyle(.plain)
+        .contentMargins(.bottom, DS.floatingTabBarClearance + 60, for: .scrollContent)   // clears tab bar + dial button
     }
     
     private var groupedCalls: [Date: [CallRecord]] {
@@ -187,18 +192,11 @@ struct CallRow: View {
 
 struct EmptyCallsView: View {
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "phone.circle")
-                .font(.system(size: 80))
-                .foregroundColor(.gray)
-            
-            Text("No Call History")
-                .font(.title2)
-                .fontWeight(.semibold)
-            
-            Text("Your call history will appear here")
-                .foregroundColor(.gray)
-        }
+        EmptyStateView(
+            icon: "phone",
+            title: "No Call History",
+            message: "Your calls will appear here."
+        )
     }
 }
 

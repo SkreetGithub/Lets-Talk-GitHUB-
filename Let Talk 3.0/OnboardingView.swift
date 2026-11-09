@@ -25,7 +25,7 @@ struct OnboardingView: View {
         ),
         OnboardingPage(
             title: "Ready to Connect?",
-            subtitle: "Join millions of users worldwide",
+            subtitle: "Connect with anyone, anywhere.",
             image: "person.3.fill",
             description: "Start your journey with Let Talk and experience seamless global communication."
         )
@@ -54,59 +54,69 @@ struct OnboardingView: View {
                     }
                 }
                 .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-                .animation(.easeInOut, value: currentPage)
+                .animation(DS.screenTransition, value: currentPage)
                 
                 // Bottom section
-                VStack(spacing: 20) {
+                VStack(spacing: DS.spacingL) {
                     // Page indicators
                     HStack(spacing: 8) {
                         ForEach(0..<pages.count, id: \.self) { index in
-                            Circle()
-                                .fill(index == currentPage ? Color.white : Color.white.opacity(0.3))
-                                .frame(width: 8, height: 8)
-                                .animation(.easeInOut, value: currentPage)
+                            Capsule()
+                                .fill(index == currentPage ? Color.white : Color.white.opacity(0.35))
+                                .frame(width: index == currentPage ? 20 : 8, height: 8)
+                                .animation(.spring(duration: 0.3), value: currentPage)
                         }
                     }
+                    .frame(maxWidth: .infinity)   // dots centered on the screen, not on the button row
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Page \(currentPage + 1) of \(pages.count)")
                     
-                    // Navigation buttons
-                    HStack(spacing: 20) {
+                    // Navigation: square Back button + full-width primary button, same height
+                    HStack(spacing: DS.spacingS) {
                         if currentPage > 0 {
-                            Button("Previous") {
-                                withAnimation {
-                                    currentPage -= 1
-                                }
+                            Button {
+                                withAnimation(DS.screenTransition) { currentPage -= 1 }
+                            } label: {
+                                Image(systemName: "chevron.left")
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                                    .frame(width: DS.primaryButtonHeight, height: DS.primaryButtonHeight)
+                                    .background(Circle().fill(Color.white.opacity(0.2)))
+                                    .contentShape(Circle())
                             }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 12)
-                            .background(Color.white.opacity(0.2))
-                            .cornerRadius(25)
+                            .buttonStyle(PressableStyle())
+                            .accessibilityLabel("Previous page")
+                            .transition(.move(edge: .leading).combined(with: .opacity))
                         }
                         
-                        Spacer()
-                        
-                        Button(currentPage == pages.count - 1 ? "Get Started" : "Next") {
+                        Button {
                             if currentPage == pages.count - 1 {
                                 completeOnboarding()
                             } else {
-                                withAnimation {
-                                    currentPage += 1
-                                }
+                                withAnimation(DS.screenTransition) { currentPage += 1 }
                             }
+                        } label: {
+                            Text(currentPage == pages.count - 1 ? "Get Started" : "Next")
+                                .font(.headline)
+                                .foregroundColor(Color(red: 0.80, green: 0.08, blue: 0.40))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: DS.primaryButtonHeight)
+                                .background(Capsule().fill(Color.white))
+                                .contentShape(Capsule())
                         }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(Color.white.opacity(0.2))
-                        .cornerRadius(25)
+                        .buttonStyle(PressableStyle())
                     }
-                    .padding(.horizontal, 30)
+                    .animation(DS.screenTransition, value: currentPage)
+                    .padding(.horizontal, DS.spacingL)
                 }
-                .padding(.bottom, 50)
+                .padding(.bottom, DS.spacingXL)
             }
         }
         .fullScreenCover(isPresented: $showAuth) {
-            AuthView()
+            // The single sign-up form (name, phone, email, password), opened in sign-up mode.
+            EnhancedAuthView(startInSignUp: true)
+                .environmentObject(AuthManager.shared)
+                .environmentObject(SettingsManager.shared)
         }
     }
     
@@ -127,38 +137,40 @@ struct OnboardingPageView: View {
     let page: OnboardingPage
     
     var body: some View {
-        VStack(spacing: 40) {
+        VStack(spacing: DS.spacingXL) {
             Spacer()
             
             // Icon
             Image(systemName: page.image)
                 .font(.system(size: 80))
+                .symbolRenderingMode(.hierarchical)
                 .foregroundColor(.white)
-                .padding(.bottom, 20)
+                .frame(height: 100)                 // same icon box on every page, so text never jumps between pages
+                .accessibilityHidden(true)
             
-            // Title
-            Text(page.title)
-                .font(.system(size: 32, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-                .multilineTextAlignment(.center)
-            
-            // Subtitle
-            Text(page.subtitle)
-                .font(.system(size: 20, weight: .medium))
-                .foregroundColor(.white.opacity(0.9))
-                .multilineTextAlignment(.center)
-            
-            // Description
-            Text(page.description)
-                .font(.system(size: 16))
-                .foregroundColor(.white.opacity(0.8))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-                .lineLimit(nil)
+            // Text block: one shared horizontal inset for title, subtitle and description
+            VStack(spacing: DS.spacingM) {
+                Text(page.title)
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                
+                Text(page.subtitle)
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(.white.opacity(0.9))
+                
+                Text(page.description)
+                    .font(.system(size: 16))
+                    .foregroundColor(.white.opacity(0.85))
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .multilineTextAlignment(.center)
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             
             Spacer()
+            Spacer()   // weights content slightly above center, like Apple's own onboarding
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, DS.spacingXL)
     }
 }
 

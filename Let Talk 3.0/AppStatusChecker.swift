@@ -216,7 +216,7 @@ struct AppStatusView: View {
             .font(.caption)
         }
         .padding()
-        .background(Color.white)
+        .background(Color(.secondarySystemBackground))
         .cornerRadius(15)
         .shadow(radius: 5)
     }

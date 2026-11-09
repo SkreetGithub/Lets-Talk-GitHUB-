@@ -72,41 +72,48 @@ final class AuthManager: ObservableObject {
         }
     }
 
-    func signUp(email: String, password: String, name: String) async throws {
+    /// Creates the account and its profile. Returns `true` when Supabase returned a session
+    /// (user is signed in now) and `false` when email confirmation is required first.
+    /// Name and phone are also stored in the auth user's metadata, so they are not lost when
+    /// the profile row can only be created after the email is confirmed.
+    @discardableResult
+    func signUp(email: String, password: String, name: String, phone: String = "") async throws -> Bool {
         guard NetworkMonitorService.shared.isConnected else { throw AuthError.networkError }
         await MainActor.run { self.isLoading = true }
         defer { Task { @MainActor in self.isLoading = false } }
 
         do {
-            let response = try await client.auth.signUp(email: email, password: password)
+            let response = try await client.auth.signUp(
+                email: email,
+                password: password,
+                data: ["name": .string(name), "phone": .string(phone)]
+            )
 
-            // If email confirmation is enabled, Supabase may return no session.
-            if let session = response.session {
-                let userId = session.user.id.uuidString.lowercased()
-                try await upsertProfile(ProfileRow(
-                    id: userId,
-                    email: email,
-                    name: name,
-                    phone: "",
-                    photoURL: nil,
-                    createdAt: Date(),
-                    lastSeen: Date(),
-                    isOnline: true,
-                    deviceTokens: nil,
-                    savedPhoneNumbers: []
-                ))
-                await fetchUserProfile(userId: userId)
-
-                await MainActor.run {
-                    self.needsPhoneVerification = true
-                }
-            } else {
-                // No session yet; user must confirm email.
+            guard let session = response.session else {
+                // Email confirmation is on: no session until the user taps the link.
                 await MainActor.run {
                     self.isAuthenticated = false
                     self.needsPhoneVerification = false
                 }
+                return false
             }
+
+            let userId = session.user.id.uuidString.lowercased()
+            try await upsertProfile(ProfileRow(
+                id: userId,
+                email: email,
+                name: name,
+                phone: phone,
+                photoURL: nil,
+                createdAt: Date(),
+                lastSeen: Date(),
+                isOnline: true,
+                deviceTokens: nil,
+                savedPhoneNumbers: []
+            ))
+            // Sets isAuthenticated / needsPhoneVerification from the saved phone number.
+            await fetchUserProfile(userId: userId)
+            return true
         } catch {
             await MainActor.run { self.error = error }
             throw error
@@ -287,52 +294,79 @@ final class AuthManager: ObservableObject {
 
     // MARK: - Private Supabase Helpers
 
+    /// Loads the signed-in user's profile.
+    ///
+    /// Previously any failure here (including a date-decoding failure that happened on EVERY
+    /// load) was treated as "profile missing": the code upserted a blank profile over the real
+    /// one (name "User", phone "") and set isAuthenticated = false. That is why every relaunch
+    /// landed on Sign In. Now:
+    ///  - the row is decoded with the Postgres date parser,
+    ///  - a blank profile is only INSERTED when no row exists (never overwrites),
+    ///  - a network/server error keeps the user signed in with their existing session.
     private func fetchUserProfile(userId: String) async {
+        let rows: [ProfileRow]
         do {
             let response = try await client.from("profiles")
                 .select()
                 .eq("id", value: userId)
-                .single()
+                .limit(1)
                 .execute()
+            rows = try PostgresDate.decoder.decode([ProfileRow].self, from: response.data)
+        } catch {
+            debugLog("Profile fetch failed:", error)
+            let sessionUser = try? await client.auth.session.user
+            await MainActor.run {
+                self.error = error
+                // The Supabase session is valid; don't bounce the user to Sign In over a
+                // transient failure. Keep the last known profile, or a minimal one.
+                if self.currentUser == nil {
+                    self.currentUser = User(id: userId, email: sessionUser?.email ?? "",
+                                            name: "User", phone: "", photoURL: nil)
+                }
+                self.needsPhoneVerification = false
+                self.isAuthenticated = true
+            }
+            return
+        }
 
-            let row = try JSONDecoder().decode(ProfileRow.self, from: response.data)
-
+        if let row = rows.first {
             await MainActor.run {
                 self.currentUser = row.asUser
                 self.needsPhoneVerification = row.phone.isEmpty
                 self.isAuthenticated = !row.phone.isEmpty
             }
-        } catch {
-            // If the profile doesn't exist yet, create a minimal one.
-            do {
-                let email = (try? await client.auth.session)?.user.email ?? ""
-                try await upsertProfile(ProfileRow(
-                    id: userId,
-                    email: email,
-                    name: "User",
-                    phone: "",
-                    photoURL: nil,
-                    createdAt: Date(),
-                    lastSeen: Date(),
-                    isOnline: true,
-                    deviceTokens: nil,
-                    savedPhoneNumbers: []
-                ))
-
-                await MainActor.run {
-                    self.currentUser = User(id: userId, email: email, name: "User", phone: "", photoURL: nil)
-                    self.needsPhoneVerification = true
-                    self.isAuthenticated = false
-                }
-            } catch {
-                await MainActor.run {
-                    self.error = error
-                    self.currentUser = User(id: userId, email: "", name: "User", phone: "", photoURL: nil)
-                    self.needsPhoneVerification = true
-                    self.isAuthenticated = false
-                }
-            }
+            return
         }
+
+        // No profile row yet (e.g. first sign-in after confirming email). Create one from the
+        // auth user's metadata, insert-only so it can never replace a real profile.
+        let user = try? await client.auth.session.user
+        let name = Self.metadataString(user?.userMetadata["name"]) ?? "User"
+        let phone = Self.metadataString(user?.userMetadata["phone"]) ?? ""
+        let email = user?.email ?? ""
+        let newRow = ProfileRow(
+            id: userId, email: email, name: name, phone: phone, photoURL: nil,
+            createdAt: Date(), lastSeen: Date(), isOnline: true,
+            deviceTokens: nil, savedPhoneNumbers: []
+        )
+        do {
+            _ = try await client.from("profiles")
+                .upsert(newRow, onConflict: "id", ignoreDuplicates: true)
+                .execute()
+        } catch {
+            debugLog("Profile create failed:", error)
+            await MainActor.run { self.error = error }
+        }
+        await MainActor.run {
+            self.currentUser = newRow.asUser
+            self.needsPhoneVerification = phone.isEmpty
+            self.isAuthenticated = !phone.isEmpty
+        }
+    }
+
+    private static func metadataString(_ value: AnyJSON?) -> String? {
+        guard case let .string(text)? = value, !text.isEmpty else { return nil }
+        return text
     }
 
     private func upsertProfile(_ row: ProfileRow) async throws {
@@ -341,8 +375,8 @@ final class AuthManager: ObservableObject {
             .execute()
     }
 
-    private func updateProfileFields(userId: String, fields: [String: AnyJSON]) async throws {
-        // Convert AnyJSON to ProfileUpdate struct
+    private func updateProfileFields(userId: String, fields: [String: ProfileValue]) async throws {
+        // Convert ProfileValue to ProfileUpdate struct
         var update = ProfileUpdate()
         
         for (key, value) in fields {
@@ -545,23 +579,41 @@ private struct ProfileRow: Codable {
     }
 }
 
-private enum AnyJSON {
+extension ProfileRow {
+    /// Lenient decoder: a null or missing column falls back to a default instead of failing
+    /// the whole profile load. (Defined in an extension so the memberwise init is kept.)
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        email = (try? c.decodeIfPresent(String.self, forKey: .email)) ?? ""
+        name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? "User"
+        phone = (try? c.decodeIfPresent(String.self, forKey: .phone)) ?? ""
+        photoURL = try? c.decodeIfPresent(String.self, forKey: .photoURL)
+        createdAt = (try? c.decodeIfPresent(Date.self, forKey: .createdAt)) ?? Date()
+        lastSeen = (try? c.decodeIfPresent(Date.self, forKey: .lastSeen)) ?? Date()
+        isOnline = (try? c.decodeIfPresent(Bool.self, forKey: .isOnline)) ?? false
+        deviceTokens = try? c.decodeIfPresent([String].self, forKey: .deviceTokens)
+        savedPhoneNumbers = (try? c.decodeIfPresent([SavedPhoneNumber].self, forKey: .savedPhoneNumbers)) ?? []
+    }
+}
+
+private enum ProfileValue {
     case string(String)
     case bool(Bool)
     case number(Double)
-    case array([AnyJSON])
-    case object([String: AnyJSON])
+    case array([ProfileValue])
+    case object([String: ProfileValue])
     case null
 
-    static func any(_ value: Any) -> AnyJSON {
+    static func any(_ value: Any) -> ProfileValue {
         switch value {
         case let v as String: return .string(v)
         case let v as Bool: return .bool(v)
         case let v as Int: return .number(Double(v))
         case let v as Double: return .number(v)
-        case let v as [Any]: return .array(v.map(AnyJSON.any))
+        case let v as [Any]: return .array(v.map(ProfileValue.any))
         case let v as [String: Any]:
-            return .object(v.mapValues(AnyJSON.any))
+            return .object(v.mapValues(ProfileValue.any))
         default:
             return .null
         }

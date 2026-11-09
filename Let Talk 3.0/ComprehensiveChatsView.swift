@@ -32,15 +32,20 @@ struct ComprehensiveChatsView: View {
             .searchable(text: $searchText, prompt: "Search conversations")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: { showNewChat = true }) {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .accessibilityLabel("New chat")
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { showSettings = true }) {
                         Image(systemName: "gearshape.fill")
                     }
+                    .accessibilityLabel("Settings")
                 }
             }
         }
-        .sheet(isPresented: $showNewChat) {
-            NewChatView()
-        }
+        // New Chat sheet is presented once, by MainTabView (it owns showNewChat).
         .sheet(isPresented: $showSettings) {
             ComprehensiveSettingsView()
         }
@@ -96,6 +101,7 @@ struct ComprehensiveChatsView: View {
             }
         }
         .listStyle(.plain)
+        .contentMargins(.bottom, DS.floatingTabBarClearance, for: .scrollContent)   // last row scrolls clear of the tab bar
     }
     
     private var filteredChats: [Chat] {
@@ -197,36 +203,13 @@ struct EmptyChatsView: View {
     @Binding var showNewChat: Bool
     
     var body: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "message.circle")
-                .font(.system(size: 80))
-                .foregroundColor(.gray)
-            
-            VStack(spacing: 8) {
-                Text("No Conversations")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                
-                Text("Start a conversation with someone")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            
-            Button(action: { showNewChat = true }) {
-                HStack {
-                    Image(systemName: "plus.circle.fill")
-                    Text("Start New Chat")
-                }
-                .font(.headline)
-                .foregroundColor(.white)
-                .padding(.horizontal, 24)
-                .padding(.vertical, 12)
-                .background(Color.blue)
-                .cornerRadius(25)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            icon: "bubble.left.and.bubble.right",
+            title: "No Conversations",
+            message: "Start a conversation with someone.",
+            actionTitle: "Start New Chat",
+            action: { showNewChat = true }
+        )
         .background(Color(.systemGroupedBackground))
     }
 }

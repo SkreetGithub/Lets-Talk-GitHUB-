@@ -308,8 +308,33 @@ struct CallControlButton: View {
                 )
                 .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
         }
-        .scaleEffect(1.0)
-        .animation(.easeInOut(duration: 0.1), value: color)
+        .buttonStyle(PressableStyle())
+        .contentShape(Circle())
+        .accessibilityLabel(accessibilityText)
+    }
+    
+    private var accessibilityText: String {
+        switch icon {
+        case "mic.fill": return "Mute microphone"
+        case "mic.slash.fill": return "Unmute microphone"
+        case "video.fill": return "Turn camera off"
+        case "video.slash.fill": return "Turn camera on"
+        case "speaker.wave.3.fill": return "Turn speaker off"
+        case "speaker.fill": return "Turn speaker on"
+        case "camera.rotate.fill": return "Switch camera"
+        case "phone.fill": return "Answer call"
+        case "phone.down.fill": return "End call"
+        default: return icon
+        }
+    }
+}
+
+/// Shared pressed-state style: slight scale-down while pressed.
+struct PressableStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.spring(duration: 0.2), value: configuration.isPressed)
     }
 }
 

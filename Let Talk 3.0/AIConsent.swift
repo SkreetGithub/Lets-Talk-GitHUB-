@@ -42,7 +42,7 @@ struct AIConsentView: View {
                 .foregroundColor(.blue)
             Text("Before we translate")
                 .font(.title2.bold())
-            Text("To translate your calls and messages, Let Talk sends the text and speech you choose to translate to Google Translate and OpenAI. We do not sell this data, and we do not use it for advertising.")
+            Text("Your speech is converted to text on your iPhone. To translate your calls and messages, Let Talk sends the recognized text (not audio) to Google Translate and OpenAI. We do not sell this data, and we do not use it for advertising.")
                 .font(.body)
                 .multilineTextAlignment(.center)
             LegalLinksView()

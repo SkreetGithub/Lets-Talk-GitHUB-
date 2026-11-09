@@ -8,11 +8,8 @@ final class DatabaseManager: ObservableObject {
     private let client = SupabaseManager.client
     private var listeners: [String: AnyCancellable] = [:]
 
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        return d
-    }()
+    // .iso8601 rejects Supabase's fractional seconds ("...04.174123+00:00"), so rows failed to decode.
+    private let decoder: JSONDecoder = PostgresDate.decoder
 
     private init() {}
 

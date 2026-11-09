@@ -11,11 +11,7 @@ final class SettingsManager: ObservableObject {
 
     private let client = SupabaseManager.client
 
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        return d
-    }()
+    private let decoder: JSONDecoder = PostgresDate.decoder   // handles Supabase fractional-second timestamps
 
     private init() {
         loadSettings()

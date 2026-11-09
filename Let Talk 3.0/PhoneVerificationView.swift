@@ -101,9 +101,9 @@ struct PhoneVerificationView: View {
                 .ignoresSafeArea()
                 
                 ScrollView {
-                    VStack(spacing: 30) {
+                    VStack(spacing: DS.spacingXL) {
                         // Header
-                        VStack(spacing: 16) {
+                        VStack(spacing: DS.spacingM) {
                             Image(systemName: "phone.circle.fill")
                                 .font(.system(size: 80))
                                 .foregroundColor(.white)
@@ -119,7 +119,8 @@ struct PhoneVerificationView: View {
                                 .foregroundColor(.white.opacity(0.8))
                                 .multilineTextAlignment(.center)
                         }
-                        .padding(.top, 40)
+                        .padding(.horizontal, DS.spacingL)   // subtitle no longer runs edge to edge
+                        .padding(.top, DS.spacingXL)
                         
                         // Steps Progress
                         StepsProgressView(
@@ -128,7 +129,7 @@ struct PhoneVerificationView: View {
                         )
                         
                         // Main Content
-                        VStack(spacing: 20) {
+                        VStack(spacing: DS.spacingL) {
                             // State Selection
                             stateSelectionSection
                             
@@ -165,7 +166,7 @@ struct PhoneVerificationView: View {
                                     .cornerRadius(8)
                             }
                         }
-                        .padding(.horizontal)
+                        .padding(.horizontal, DS.spacingM)
                         
                         Spacer(minLength: 100)
                     }
@@ -286,27 +287,24 @@ struct PhoneVerificationView: View {
             
             if isAreaCodeDropdownOpen {
                 ScrollView {
-                    LazyVGrid(columns: [
-                        GridItem(.flexible()),
-                        GridItem(.flexible()),
-                        GridItem(.flexible())
-                    ], spacing: 8) {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: DS.spacingS), count: 3),
+                              spacing: DS.spacingS) {
                         ForEach(selectedAreaCodes, id: \.self) { code in
                             Button(action: { selectAreaCode(code) }) {
                                 Text(code)
                                     .font(.system(.body, design: .rounded))
                                     .fontWeight(.medium)
                                     .foregroundColor(areaCode == code ? .white : .blue)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity, minHeight: DS.minTapTarget)
                                     .background(areaCode == code ? Color.blue : Color.blue.opacity(0.1))
-                                    .cornerRadius(20)
+                                    .clipShape(Capsule())
                             }
-                            .buttonStyle(ScaleButtonStyle())
+                            .buttonStyle(PressableStyle())
+                            .accessibilityLabel("Area code \(code)")
                         }
                     }
                 }
-                .padding(8)
+                .padding(DS.spacingS)
             }
             
             if !areaCode.isEmpty {
@@ -322,7 +320,7 @@ struct PhoneVerificationView: View {
     }
     
     private var phoneNumberDisplay: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .center, spacing: DS.spacingS) {
             Text("Selected Phone Number:")
                 .font(.subheadline)
                 .foregroundColor(.white)
@@ -330,9 +328,14 @@ struct PhoneVerificationView: View {
             Text(formattedPhoneNumber)
                 .font(.title2.bold())
                 .foregroundColor(.white)
+                .monospacedDigit()                 // digits don't shift width as the number changes
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .contentTransition(.numericText())
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(DS.spacingM)
         .background(Color.white.opacity(0.1))
         .cornerRadius(15)
     }
@@ -367,20 +370,21 @@ struct PhoneVerificationView: View {
             
             if isNumbersDropdownOpen {
                 ScrollView {
-                    VStack(spacing: 8) {
+                    VStack(spacing: DS.spacingS) {
                         ForEach(randomNumbers, id: \.self) { number in
                             Button(action: { selectNumber(number) }) {
                                 Text(number)
                                     .font(.title3.bold())
                                     .foregroundColor(selectedNumbers.contains(number) ? .white : .purple)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
+                                    .monospacedDigit()
+                                    .frame(maxWidth: .infinity, minHeight: DS.primaryButtonHeight - 4)
                                     .background(selectedNumbers.contains(number) ? Color.purple : Color.purple.opacity(0.1))
-                                    .cornerRadius(25)
+                                    .clipShape(Capsule())
                             }
-                            .buttonStyle(ScaleButtonStyle())
+                            .buttonStyle(PressableStyle())
                         }
                     }
+                    .padding(DS.spacingS)
                 }
                 .background(Color.white)
                 .cornerRadius(10)
@@ -400,43 +404,37 @@ struct PhoneVerificationView: View {
     }
     
     private var lockInButton: some View {
-        ZStack(alignment: .leading) {
-            // Background
-            Capsule()
-                .fill(
-                    (!selectedState.isEmpty && !areaCode.isEmpty && !selectedNumbers.isEmpty)
-                    ? Color.gray.opacity(0.6)
-                    : Color.gray.opacity(0.3)
-                )
-            
-            // Progress fill with glow effect
-            Capsule()
-                .fill(Color.green)
-                .frame(width: UIScreen.main.bounds.width * 0.8 * (lockProgress / 100))
-                .overlay(
-                    Capsule()
-                        .stroke(Color.green.opacity(0.5), lineWidth: lockProgress > 0 ? 2 : 0)
-                        .blur(radius: lockProgress > 50 ? 4 : 0)
-                )
-                .animation(.linear(duration: 0.1), value: lockProgress)
-            
-            // Button content
-            HStack {
-                Spacer()
-                HStack(spacing: 8) {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                // Track
+                Capsule()
+                    .fill(Color.gray.opacity(0.6))
+                
+                // Progress fill: uses the button's own width, so 100% fills the whole capsule
+                Capsule()
+                    .fill(Color.green)
+                    .frame(width: max(geo.size.height, geo.size.width * min(lockProgress, 100) / 100))
+                    .opacity(lockProgress > 0 ? 1 : 0)
+                    .shadow(color: Color.green.opacity(lockProgress > 50 ? 0.6 : 0), radius: 6)
+                    .animation(.linear(duration: 0.1), value: lockProgress)
+                
+                // Label, centered over the full width
+                HStack(spacing: DS.spacingS) {
                     Text(isLocked ? "Locked In" : "Hold to Lock In")
                         .font(.headline)
                     Image(systemName: isLocked ? "lock.fill" : "lock.open.fill")
                         .font(.system(size: 16, weight: .semibold))
+                        .contentTransition(.symbolEffect(.replace))
                 }
-                Spacer()
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
             }
-            .foregroundColor(.white)
-            .frame(height: 50)
+            .clipShape(Capsule())
         }
-        .frame(height: 50)
-        .cornerRadius(25)
-        .disabled(selectedState.isEmpty || areaCode.isEmpty || selectedNumbers.isEmpty || isLocked)
+        .frame(height: DS.primaryButtonHeight)
+        .contentShape(Capsule())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(isLocked ? "Number locked in" : "Hold to lock in your number")
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in startLockTimer() }
@@ -454,11 +452,12 @@ struct PhoneVerificationView: View {
                 Image(systemName: "arrow.right")
             }
             .frame(maxWidth: .infinity)
-            .padding()
+            .frame(height: DS.primaryButtonHeight)   // same height and shape as the Lock In capsule above
             .background(Color.green)
             .foregroundColor(.white)
-            .cornerRadius(10)
+            .clipShape(Capsule())
         }
+        .buttonStyle(PressableStyle())
         .transition(.scale.combined(with: .opacity))
     }
     
@@ -594,9 +593,9 @@ struct StepsProgressView: View {
     let steps: [String]
     
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .top, spacing: DS.spacingS) {
             ForEach(0..<steps.count, id: \.self) { index in
-                VStack(spacing: 8) {
+                VStack(spacing: DS.spacingS) {
                     ZStack {
                         Circle()
                             .fill(index <= currentStep ? Color.white : Color.white.opacity(0.3))
@@ -617,6 +616,8 @@ struct StepsProgressView: View {
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.8))
                         .multilineTextAlignment(.center)
+                        .lineLimit(1)
+                        .fixedSize()
                 }
                 
                 if index < steps.count - 1 {
@@ -624,6 +625,7 @@ struct StepsProgressView: View {
                         .fill(index < currentStep ? Color.white : Color.white.opacity(0.3))
                         .frame(height: 2)
                         .frame(maxWidth: .infinity)
+                        .padding(.top, 14)   // 30pt circle / 2 - 1pt line: line passes through the circle centers
                 }
             }
         }

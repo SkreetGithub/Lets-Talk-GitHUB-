@@ -195,7 +195,6 @@ struct SubtitleOverlay: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Spacer()
             if let message = session.errorMessage {
                 Text(message).font(.caption).foregroundColor(.orange)
             }
@@ -206,9 +205,11 @@ struct SubtitleOverlay: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
-                    .background(Color.black.opacity(0.65))
+                    .lineLimit(4)
+                    .background(Color.black.opacity(0.7))
                     .cornerRadius(12)
                     .padding(.horizontal, 20)
+                    .accessibilityLabel("Translated subtitle: \(session.subtitle)")
                     .transition(.opacity)
             }
             if !session.mySpeech.isEmpty {
@@ -218,7 +219,6 @@ struct SubtitleOverlay: View {
                     .lineLimit(2)
                     .padding(.horizontal, 20)
             }
-            Color.clear.frame(height: 150)   // keep clear of the call controls
         }
         .animation(.easeInOut(duration: 0.2), value: session.subtitle)
         .allowsHitTesting(false)

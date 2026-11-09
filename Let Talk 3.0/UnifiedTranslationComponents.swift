@@ -25,40 +25,43 @@ struct UnifiedLanguageButton: View {
     
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                Text(language.flag)
-                    .font(.system(size: 24))
+            // Vertical tile: flag, name, code. Side-by-side layout left ~38pt for the
+            // name, which broke "English" into "En/gli/sh".
+            VStack(spacing: DS.spacingXS) {
+                FlagView(flag: language.flag, height: 26)
                 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(language.name)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.white)
-                    
-                    Text(language.code.uppercased())
-                        .font(.system(size: 12, weight: .regular))
-                        .foregroundColor(.white.opacity(0.7))
-                }
+                Text(language.name)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 
-                Spacer()
-                
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(.blue)
-                }
+                Text(language.code.uppercased())
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundColor(.white.opacity(0.7))
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 96)   // both tiles always the same height
+            .padding(.horizontal, DS.spacingS)
             .background(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: DS.cornerRadiusS)
                     .fill(isSelected ? Color.blue.opacity(0.1) : Color.clear)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: DS.cornerRadiusS)
                             .stroke(isSelected ? Color.blue : Color.white.opacity(0.3), lineWidth: 1)
                     )
             )
+            .overlay(alignment: .topTrailing) {
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(.blue)
+                        .padding(DS.spacingS)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: DS.cornerRadiusS))
         }
-        .buttonStyle(PlainButtonStyle())
+        .buttonStyle(PressableStyle())
+        .accessibilityLabel("\(language.name). Tap to change language")
     }
 }
 
@@ -105,24 +108,38 @@ struct UnifiedTextInputCard: View {
                 }
             }
             
-            ZStack {
+            ZStack(alignment: .topLeading) {
                 TextEditor(text: $text)
-                    .frame(height: 120)
-                    .padding(16)
+                    .scrollContentBackground(.hidden)   // keep the glass look; white text was invisible on the default white box
+                    .font(.body)
+                    .frame(minHeight: 120)
+                    .padding(DS.spacingM)
                     .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color.white.opacity(0.1))
+                        RoundedRectangle(cornerRadius: DS.cornerRadiusM)
+                            .fill(Color.white.opacity(0.12))
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: DS.cornerRadiusM)
+                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
                     )
                     .foregroundColor(.white)
+                    .accessibilityLabel("Text to translate")
+                
+                // Placeholder. TextEditor has none; offsets match its built-in text insets (5pt / 8pt).
+                if text.isEmpty && !isProcessing {
+                    Text("Type or paste text to translate...")
+                        .font(.body)
+                        .foregroundColor(.white.opacity(0.6))
+                        .padding(.horizontal, DS.spacingM + 5)
+                        .padding(.vertical, DS.spacingM + 8)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
                 
                 if isProcessing {
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: DS.cornerRadiusM)
                         .fill(Color.black.opacity(0.4))
-                        .frame(height: 120)
+                        .frame(maxWidth: .infinity, minHeight: 120 + DS.spacingM * 2)
                         .overlay(
                             VStack(spacing: 8) {
                                 ProgressView()
@@ -187,6 +204,8 @@ struct UnifiedControlButton: View {
             )
             .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
         }
+        .buttonStyle(PressableStyle())
+        .accessibilityLabel(title)
         .disabled(isProcessing)
     }
 }
@@ -211,18 +230,20 @@ struct UnifiedTranslateButton: View {
                 Text("Translate")
                     .fontWeight(.semibold)
             }
+            .frame(maxWidth: .infinity)
+            .frame(height: 70)                       // same height as the Speak button beside it
+            .background(
+                RoundedRectangle(cornerRadius: DS.cornerRadiusM)
+                    .fill(canTranslate ? Color.blue.opacity(0.8) : Color.gray.opacity(0.5))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.cornerRadiusM)
+                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: DS.cornerRadiusM))
+            .animation(.easeInOut(duration: 0.2), value: isTranslating)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 16)
-        .padding(.horizontal, 20)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(canTranslate ? Color.blue.opacity(0.8) : Color.gray.opacity(0.5))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.3), lineWidth: 1)
-        )
+        .buttonStyle(PressableStyle())
         .foregroundColor(.white)
         .disabled(!canTranslate || isTranslating)
         .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
@@ -248,7 +269,7 @@ struct UnifiedLanguageSelectionCard: View {
                 Spacer()
             }
             
-            HStack(spacing: 20) {
+            HStack(spacing: DS.spacingS) {
                 // Source Language
                 UnifiedLanguageButton(
                     language: sourceLanguage,
@@ -274,7 +295,8 @@ struct UnifiedLanguageSelectionCard: View {
                             .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
                     )
                 }
-                .buttonStyle(ScaleButtonStyle())
+                .buttonStyle(PressableStyle())
+                .accessibilityLabel("Swap languages")
                 
                 // Target Language
                 UnifiedLanguageButton(
@@ -309,7 +331,7 @@ struct UnifiedTranslationControlsCard: View {
     var body: some View {
         VStack(spacing: 20) {
             // First Row - Input Methods
-            HStack(spacing: 16) {
+            HStack(spacing: DS.spacingM) {
                 UnifiedControlButton(
                     icon: isRecording ? "mic.fill" : "mic",
                     title: "Voice",
@@ -336,7 +358,7 @@ struct UnifiedTranslationControlsCard: View {
             }
             
             // Second Row - Translate and Speaker
-            HStack(spacing: 16) {
+            HStack(spacing: DS.spacingM) {
                 UnifiedTranslateButton(
                     isTranslating: isTranslating,
                     canTranslate: canTranslate,
@@ -438,101 +460,86 @@ struct UnifiedHeader: View {
     let onSettingsTap: () -> Void
     
     var body: some View {
-        VStack(spacing: 16) {
-            HStack {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "globe.americas.fill")
-                            .font(.title)
-                            .foregroundColor(.white)
-                            .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(title)
-                                .font(.largeTitle)
-                                .fontWeight(.bold)
-                                .foregroundColor(.white)
-                                .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
-                            
-                            Text(subtitle)
-                                .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.9))
-                                .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
-                        }
-                    }
+        VStack(alignment: .leading, spacing: DS.spacingM) {
+            // Row 1: icon + title. Full width, so "AI Translator" stays on one line.
+            HStack(alignment: .center, spacing: DS.spacingM) {
+                Image(systemName: "globe.americas.fill")
+                    .font(.title)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundColor(.white)
+                    .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+                    .accessibilityHidden(true)
+                
+                VStack(alignment: .leading, spacing: DS.spacingXS) {
+                    Text(title)
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
                     
-                    // Status indicator
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(isTranslating ? Color.green : Color.orange)
-                            .frame(width: 8, height: 8)
-                            .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
-                        
-                        Text(isTranslating ? "Translating..." : "Ready to translate")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.8))
-                        
-                        Spacer()
-                        
-                        // Language pair indicator
-                        Text("\(sourceLanguage.code.uppercased()) → \(targetLanguage.code.uppercased())")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.8))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(.ultraThinMaterial)
-                                    .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
-                            )
-                    }
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.9))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
                 }
                 
-                Spacer()
+                Spacer(minLength: 0)
+            }
+            
+            // Row 2: status + language pair on the left, actions on the right.
+            HStack(spacing: DS.spacingS) {
+                Circle()
+                    .fill(isTranslating ? Color.green : Color.orange)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
                 
-                HStack(spacing: 12) {
-                    // History button
-                    Button(action: onHistoryTap) {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                            .frame(width: 44, height: 44)
-                            .background(
-                                Circle()
-                                    .fill(.ultraThinMaterial)
-                                    .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
-                            )
-                    }
-                    
-                    // Favorites button
-                    Button(action: onFavoritesTap) {
-                        Image(systemName: "heart.fill")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                            .frame(width: 44, height: 44)
-                            .background(
-                                Circle()
-                                    .fill(.ultraThinMaterial)
-                                    .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
-                            )
-                    }
-                    
-                    // Settings button
-                    Button(action: onSettingsTap) {
-                        Image(systemName: "gearshape.fill")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                            .frame(width: 44, height: 44)
-                            .background(
-                                Circle()
-                                    .fill(.ultraThinMaterial)
-                                    .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
-                            )
-                    }
-                }
+                Text(isTranslating ? "Translating..." : "Ready to translate")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.8))
+                    .lineLimit(1)
+                    .fixedSize()
+                
+                Text("\(sourceLanguage.code.uppercased()) → \(targetLanguage.code.uppercased())")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.8))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, DS.spacingS)
+                    .padding(.vertical, DS.spacingXS)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(.ultraThinMaterial)
+                            .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+                    )
+                
+                Spacer(minLength: DS.spacingS)
+                
+                headerButton("clock.arrow.circlepath", label: "Translation history", action: onHistoryTap)
+                headerButton("heart.fill", label: "Favorites", action: onFavoritesTap)
+                headerButton("gearshape.fill", label: "Translator settings", action: onSettingsTap)
             }
         }
-        .padding(.top, 10)
+        .padding(.top, DS.spacingL)   // breathing room below the nav bar; title no longer touches the gradient edge
+    }
+    
+    private func headerButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundColor(.white)
+                .frame(width: DS.minTapTarget, height: DS.minTapTarget)
+                .background(
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                )
+        }
+        .buttonStyle(PressableStyle())
+        .accessibilityLabel(label)
     }
 }
 
@@ -553,21 +560,21 @@ struct UnifiedBackground: View {
             )
             .ignoresSafeArea()
             
-            // Animated particles
-            ForEach(0..<20, id: \.self) { index in
-                Circle()
-                    .fill(Color.white.opacity(0.1))
-                    .frame(width: CGFloat.random(in: 4...12))
-                    .position(
-                        x: CGFloat.random(in: 0...UIScreen.main.bounds.width),
-                        y: CGFloat.random(in: 0...UIScreen.main.bounds.height)
-                    )
-                    .animation(
-                        Animation.linear(duration: Double.random(in: 10...20))
-                            .repeatForever(autoreverses: false),
-                        value: UUID()
-                    )
+            // Static particles. Positions are derived from the index, so they no longer jump
+            // to new random spots every time the screen re-renders (e.g. on each keystroke).
+            GeometryReader { geo in
+                ForEach(0..<20, id: \.self) { index in
+                    let fx = CGFloat((index * 37 + 11) % 100) / 100
+                    let fy = CGFloat((index * 61 + 23) % 100) / 100
+                    Circle()
+                        .fill(Color.white.opacity(0.1))
+                        .frame(width: CGFloat(4 + (index * 7) % 9))
+                        .position(x: fx * geo.size.width, y: fy * geo.size.height)
+                }
             }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
     }
 }

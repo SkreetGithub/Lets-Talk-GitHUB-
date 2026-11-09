@@ -110,6 +110,7 @@ struct ContactsView: View {
             }
         }
         .listStyle(.plain)
+        .contentMargins(.bottom, DS.floatingTabBarClearance, for: .scrollContent)
     }
     
     private var groupedContacts: [String: [Contact]] {
@@ -207,28 +208,13 @@ struct EmptyContactsView: View {
     @Binding var showAddContact: Bool
     
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "person.2.circle")
-                .font(.system(size: 80))
-                .foregroundColor(.gray)
-            
-            Text("No Contacts")
-                .font(.title2)
-                .fontWeight(.semibold)
-            
-            Text("Add contacts to start messaging")
-                .foregroundColor(.gray)
-            
-            Button(action: { showAddContact = true }) {
-                Text("Add Contact")
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .padding()
-                    .background(Color.blue)
-                    .cornerRadius(10)
-            }
-            .padding(.top)
-        }
+        EmptyStateView(
+            icon: "person.2",
+            title: "No Contacts",
+            message: "Add contacts to start messaging.",
+            actionTitle: "Add Contact",
+            action: { showAddContact = true }
+        )
     }
 }
 

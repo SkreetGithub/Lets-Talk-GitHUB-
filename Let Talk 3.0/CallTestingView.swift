@@ -104,7 +104,7 @@ struct CallTestingView: View {
                     }
                 }
                 .padding()
-                .background(Color.white)
+                .background(Color(.secondarySystemBackground))
                 .cornerRadius(15)
                 .shadow(radius: 5)
                 
