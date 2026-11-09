@@ -206,7 +206,6 @@ class CallsViewModel: ObservableObject {
     @Published var error: Error?
     
     private let databaseManager = DatabaseManager.shared
-    private let webRTCService = WebRTCService()
     
     init() {
         loadCalls()
@@ -247,13 +246,9 @@ class CallsViewModel: ObservableObject {
         }
     }
     
-    func initiateCall(to contact: Contact) {
-        Task {
-            do {
-                try await webRTCService.startCall(to: contact.phone)
-            } catch {
-                self.error = error
-            }
+    func initiateCall(to contact: Contact, isVideo: Bool = false) {
+        Task { @MainActor in
+            CallCoordinator.shared.startCall(to: contact, isVideo: isVideo)
         }
     }
 }
@@ -332,15 +327,9 @@ struct DialpadView: View {
 
 
 class DialpadViewModel: ObservableObject {
-    private let webRTCService = WebRTCService.shared
-    
     func makeCall(to phoneNumber: String) {
-        Task {
-            do {
-                try await webRTCService.startCall(to: phoneNumber)
-            } catch {
-                // Handle error
-            }
+        Task { @MainActor in
+            CallCoordinator.shared.startCall(toPhone: phoneNumber, isVideo: false)
         }
     }
 }

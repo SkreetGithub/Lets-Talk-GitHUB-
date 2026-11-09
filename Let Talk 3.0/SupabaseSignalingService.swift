@@ -8,13 +8,21 @@ final class SupabaseSignalingService: ObservableObject {
 
     private let client = SupabaseManager.client
 
-    // Weak multi-cast delegate list so both WebRTC managers can listen.
+    // Weak multi-cast delegate list. Only WebRTCCallManager registers now (WebRTCService no longer does).
     private let delegates = NSHashTable<AnyObject>.weakObjects()
 
-    private var callPollTimers: [String: Timer] = [:]
-    private var messagePollTimers: [String: Timer] = [:]
+    // Polling runs in Tasks, not Timers: Timer.scheduledTimer only fires on a thread with a
+    // running run loop, and these were started from async (background) code, so after the first
+    // poll they never fired again. Offers, answers and ICE candidates were never received.
+    private var callPollTasks: [String: Task<Void, Never>] = [:]
+    private var messagePollTasks: [String: Task<Void, Never>] = [:]
     private var processedMessageIdsByCall: [String: Set<String>] = [:]
-    private var incomingCallsTimer: Timer?
+    private var incomingCallsTask: Task<Void, Never>?
+    private var announcedIncomingCallIds: Set<String> = []
+    private let lock = NSLock()
+
+    /// Incoming calls older than this are treated as stale (e.g. the caller's app crashed).
+    private let incomingCallMaxAge: TimeInterval = 45
 
     // .iso8601 rejects Supabase's fractional seconds ("...04.174123+00:00"), so rows failed to decode.
     private let decoder: JSONDecoder = PostgresDate.decoder
@@ -136,6 +144,16 @@ final class SupabaseSignalingService: ObservableObject {
         stopListening(callId: callId)
     }
 
+    /// Marks an unanswered outgoing call as missed (stops the other phone ringing).
+    func markMissed(callId: String) async throws {
+        _ = try await client.from("calls")
+            .update(CallUpdate(status: CallStatus.missed.rawValue, endedAt: ISO8601DateFormatter().string(from: Date())))
+            .eq("id", value: callId)
+            .eq("status", value: CallStatus.initiated.rawValue)
+            .execute()
+        stopListening(callId: callId)
+    }
+
     // MARK: - Signaling Messages
 
     func sendOffer(callId: String, offer: RTCSessionDescription) async throws {
@@ -180,28 +198,41 @@ final class SupabaseSignalingService: ObservableObject {
 
     // MARK: - Listening
 
-    func startListeningForIncomingCalls() {
-        incomingCallsTimer?.invalidate()
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock(); defer { lock.unlock() }
+        return body()
+    }
 
-        incomingCallsTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task {
-                await self.pollIncomingCalls()
+    /// Runs `body` now and then every `seconds` until cancelled. Polls never overlap.
+    private func pollingTask(every seconds: Double, _ body: @escaping () async -> Void) -> Task<Void, Never> {
+        Task.detached(priority: .userInitiated) {
+            while !Task.isCancelled {
+                await body()
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             }
         }
+    }
 
-        // Fire immediately.
-        Task { await pollIncomingCalls() }
+    func startListeningForIncomingCalls() {
+        let task = pollingTask(every: 1.5) { [weak self] in
+            await self?.pollIncomingCalls()
+        }
+        withLock {
+            incomingCallsTask?.cancel()
+            incomingCallsTask = task
+        }
     }
 
     private func pollIncomingCalls() async {
         guard let currentUserId = AuthManager.shared.currentUserId else { return }
+        let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-incomingCallMaxAge))
 
         do {
             let response = try await client.from("calls")
                 .select()
                 .eq("callee_id", value: currentUserId)
                 .eq("status", value: CallStatus.initiated.rawValue)
+                .gte("created_at", value: cutoff)          // ignore stale rows that would ring forever
                 .order("created_at", ascending: false)
                 .limit(5)
                 .execute()
@@ -209,24 +240,30 @@ final class SupabaseSignalingService: ObservableObject {
             let calls = try decoder.decode([CallRowData].self, from: response.data)
 
             for call in calls {
+                // Announce each call once (it used to be re-announced every 1.5 s).
+                let isNew = withLock { announcedIncomingCallIds.insert(call.id).inserted }
+                guard isNew else { continue }
                 notify { $0.supabaseSignaling(self, didReceiveIncomingCall: call.asCall) }
             }
         } catch {
-            notify { $0.supabaseSignaling(self, didReceiveError: error) }
+            debugLog("Incoming-call poll failed: \(error)")
         }
     }
 
+    /// Watches a call row (answered / rejected / ended / missed). Used by the caller, and by the
+    /// callee while ringing so it stops ringing if the caller hangs up first.
+    func watchCall(callId: String) {
+        listenForCallUpdates(callId: callId)
+    }
+
     private func listenForCallUpdates(callId: String) {
-        callPollTimers[callId]?.invalidate()
-
-        callPollTimers[callId] = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task {
-                await self.pollCall(callId: callId)
-            }
+        let task = pollingTask(every: 1.0) { [weak self] in
+            await self?.pollCall(callId: callId)
         }
-
-        Task { await pollCall(callId: callId) }
+        withLock {
+            callPollTasks[callId]?.cancel()
+            callPollTasks[callId] = task
+        }
     }
 
     private func pollCall(callId: String) async {
@@ -240,25 +277,19 @@ final class SupabaseSignalingService: ObservableObject {
             let row = try decoder.decode(CallRowData.self, from: response.data)
             notify { $0.supabaseSignaling(self, didReceiveCallUpdate: row.asCall) }
         } catch {
-            notify { $0.supabaseSignaling(self, didReceiveError: error) }
+            debugLog("Call poll failed: \(error)")
         }
     }
 
     func listenForSignalingMessages(callId: String) {
-        messagePollTimers[callId]?.invalidate()
-
-        if processedMessageIdsByCall[callId] == nil {
-            processedMessageIdsByCall[callId] = []
+        let task = pollingTask(every: 0.5) { [weak self] in
+            await self?.pollSignals(callId: callId)
         }
-
-        messagePollTimers[callId] = Timer.scheduledTimer(withTimeInterval: 0.75, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task {
-                await self.pollSignals(callId: callId)
-            }
+        withLock {
+            if processedMessageIdsByCall[callId] == nil { processedMessageIdsByCall[callId] = [] }
+            messagePollTasks[callId]?.cancel()
+            messagePollTasks[callId] = task
         }
-
-        Task { await pollSignals(callId: callId) }
     }
 
     private func pollSignals(callId: String) async {
@@ -267,52 +298,52 @@ final class SupabaseSignalingService: ObservableObject {
                 .select()
                 .eq("call_id", value: callId)
                 .order("timestamp", ascending: true)
-                .limit(200)
+                .limit(500)
                 .execute()
 
             let rows = try decoder.decode([SignalRow].self, from: response.data)
+            let me = AuthManager.shared.currentUserId
 
-            var processed = processedMessageIdsByCall[callId] ?? []
-
-            for row in rows {
-                if processed.contains(row.id) { continue }
-                processed.insert(row.id)
-
-                // Only process messages from other users
-                if row.senderId == AuthManager.shared.currentUserId {
-                    continue
+            let fresh: [SignalRow] = withLock {
+                var processed = processedMessageIdsByCall[callId] ?? []
+                var out: [SignalRow] = []
+                for row in rows where !processed.contains(row.id) {
+                    processed.insert(row.id)
+                    if row.senderId != me { out.append(row) }   // only the other side's messages
                 }
-
-                notify { $0.supabaseSignaling(self, didReceiveSignalingMessage: row.asSignalingMessage) }
+                processedMessageIdsByCall[callId] = processed
+                return out
             }
 
-            processedMessageIdsByCall[callId] = processed
+            // Offers/answers first, so ICE candidates in the same batch have a description to attach to.
+            let ordered = fresh.filter { $0.type != SignalingMessageType.iceCandidate.rawValue }
+                + fresh.filter { $0.type == SignalingMessageType.iceCandidate.rawValue }
+            for row in ordered {
+                notify { $0.supabaseSignaling(self, didReceiveSignalingMessage: row.asSignalingMessage) }
+            }
         } catch {
-            notify { $0.supabaseSignaling(self, didReceiveError: error) }
+            debugLog("Signal poll failed: \(error)")
         }
     }
 
     func stopListening(callId: String) {
-        callPollTimers[callId]?.invalidate()
-        callPollTimers.removeValue(forKey: callId)
-
-        messagePollTimers[callId]?.invalidate()
-        messagePollTimers.removeValue(forKey: callId)
-
-        processedMessageIdsByCall.removeValue(forKey: callId)
+        withLock {
+            callPollTasks.removeValue(forKey: callId)?.cancel()
+            messagePollTasks.removeValue(forKey: callId)?.cancel()
+            processedMessageIdsByCall.removeValue(forKey: callId)
+        }
     }
 
     private func removeAllListeners() {
-        incomingCallsTimer?.invalidate()
-        incomingCallsTimer = nil
-
-        callPollTimers.values.forEach { $0.invalidate() }
-        callPollTimers.removeAll()
-
-        messagePollTimers.values.forEach { $0.invalidate() }
-        messagePollTimers.removeAll()
-
-        processedMessageIdsByCall.removeAll()
+        withLock {
+            incomingCallsTask?.cancel()
+            incomingCallsTask = nil
+            callPollTasks.values.forEach { $0.cancel() }
+            callPollTasks.removeAll()
+            messagePollTasks.values.forEach { $0.cancel() }
+            messagePollTasks.removeAll()
+            processedMessageIdsByCall.removeAll()
+        }
     }
 }
 

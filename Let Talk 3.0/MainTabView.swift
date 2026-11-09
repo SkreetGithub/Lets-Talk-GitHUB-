@@ -5,6 +5,9 @@ struct MainTabView: View {
     @EnvironmentObject var notificationManager: NotificationManager
     @EnvironmentObject var settingsManager: SettingsManager
     @StateObject private var tabViewModel = MainTabViewModel()
+    // Owns the call screen for every outgoing and incoming call (and starts call polling).
+    // The call screen lives in its own window (see CallCoordinator), above sheets.
+    @StateObject private var callCoordinator = CallCoordinator.shared
     @State private var selectedTab = Tab.contacts
     @State private var showNewChat = false
     @State private var showSettings = false

@@ -173,6 +173,31 @@ final class DatabaseManager: ObservableObject {
         return profile.asUser
     }
 
+    /// Finds the Let Talk user who owns a phone number, or nil if nobody does.
+    /// Numbers are stored in more than one format ("4704588823" from sign-up,
+    /// "(470) 458-8823" from the number picker), so every common format is tried.
+    func findUserId(byPhone raw: String) async throws -> String? {
+        let digits = raw.filter(\.isNumber)
+        guard digits.count >= 7 else { return nil }
+        let last10 = String(digits.suffix(10))
+        var candidates: Set<String> = [raw, digits, "+" + digits, last10, "1" + last10, "+1" + last10]
+        if last10.count == 10 {
+            let a = last10.prefix(3), b = last10.dropFirst(3).prefix(3), c = last10.suffix(4)
+            candidates.formUnion(["(\(a)) \(b)-\(c)", "\(a)-\(b)-\(c)", "+1 (\(a)) \(b)-\(c)", "\(a) \(b) \(c)"])
+        }
+
+        let response = try await client.from("profiles")
+            .select("id, phone")
+            .in("phone", values: Array(candidates))
+            .limit(5)
+            .execute()
+
+        struct Row: Decodable { let id: String; let phone: String? }
+        let rows = try decoder.decode([Row].self, from: response.data)
+        // Prefer the row whose digits really match (guards against a short-number collision).
+        return rows.first { ($0.phone ?? "").filter(\.isNumber).hasSuffix(last10) }?.id ?? rows.first?.id
+    }
+
     func searchUsers(query: String) async throws -> [User] {
         let response = try await client.from("profiles")
             .select()

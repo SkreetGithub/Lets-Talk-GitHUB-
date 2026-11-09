@@ -79,6 +79,34 @@ enum Backend {
         let _: VoIPPushResponse = try await call("send-voip-push", body: VoIPPushRequest(callee_id: calleeId, caller_name: callerName, call_id: callId, video: video))
     }
 
+    struct IceServer: Decodable {
+        let urls: [String]
+        let username: String?
+        let credential: String?
+
+        private enum CodingKeys: String, CodingKey { case urls, username, credential }
+
+        // Cloudflare may send "urls" as a single string or an array.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            if let many = try? c.decode([String].self, forKey: .urls) {
+                urls = many
+            } else {
+                urls = [try c.decode(String.self, forKey: .urls)]
+            }
+            username = try c.decodeIfPresent(String.self, forKey: .username)
+            credential = try c.decodeIfPresent(String.self, forKey: .credential)
+        }
+    }
+    struct TurnCredentialsResponse: Decodable {
+        let iceServers: [IceServer]
+        let ttl: Int
+    }
+    /// Short-lived Cloudflare TURN credentials for the signed-in user.
+    static func turnCredentials() async throws -> TurnCredentialsResponse {
+        try await call("turn-credentials", body: Empty())
+    }
+
     struct DeleteResponse: Decodable { let deleted: Bool? }
     static func deleteAccount() async throws {
         let _: DeleteResponse = try await call("delete-account", body: Empty())

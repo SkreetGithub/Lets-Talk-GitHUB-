@@ -8,9 +8,6 @@ struct ContactsView: View {
     @State private var showAddContact = false
     @State private var selectedContact: Contact?
     @State private var showContactActions = false
-    @State private var showCallView = false
-    @State private var callContact: Contact?
-    @State private var isVideoCall = false
     @State private var showChatView = false
     @State private var selectedChat: Chat?
     
@@ -41,11 +38,6 @@ struct ContactsView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(viewModel.error?.localizedDescription ?? "An error occurred")
-        }
-        .fullScreenCover(isPresented: $showCallView) {
-            if let contact = callContact {
-                CallView(contact: contact, isVideo: isVideoCall)
-            }
         }
         .fullScreenCover(isPresented: $showChatView) {
             if let chat = selectedChat {
@@ -88,18 +80,14 @@ struct ContactsView: View {
                                 .tint(.blue)
                                 
                                 Button {
-                                    callContact = contact
-                                    isVideoCall = false
-                                    showCallView = true
+                                    CallCoordinator.shared.startCall(to: contact, isVideo: false)
                                 } label: {
                                     Label("Call", systemImage: "phone")
                                 }
                                 .tint(.green)
                                 
                                 Button {
-                                    callContact = contact
-                                    isVideoCall = true
-                                    showCallView = true
+                                    CallCoordinator.shared.startCall(to: contact, isVideo: true)
                                 } label: {
                                     Label("Video", systemImage: "video")
                                 }
@@ -145,17 +133,13 @@ struct ContactsView: View {
         }
         
         Button {
-            callContact = contact
-            isVideoCall = false
-            showCallView = true
+            CallCoordinator.shared.startCall(to: contact, isVideo: false)
         } label: {
             Label("Call", systemImage: "phone")
         }
         
         Button {
-            callContact = contact
-            isVideoCall = true
-            showCallView = true
+            CallCoordinator.shared.startCall(to: contact, isVideo: true)
         } label: {
             Label("Video Call", systemImage: "video")
         }
@@ -225,7 +209,6 @@ class ContactsViewModel: ObservableObject {
     @Published var showError = false
     
     private let contactManager = ContactManager.shared
-    private let webRTCService = WebRTCService()
     private var cancellables = Set<AnyCancellable>()
     
     init() {
@@ -316,29 +299,11 @@ class ContactsViewModel: ObservableObject {
     }
     
     func startCall(with contact: Contact) {
-        Task {
-            do {
-                try await webRTCService.startCall(to: contact.phone)
-            } catch {
-                await MainActor.run {
-                    self.error = error
-                    self.showError = true
-                }
-            }
-        }
+        Task { @MainActor in CallCoordinator.shared.startCall(to: contact, isVideo: false) }
     }
     
     func startVideoCall(with contact: Contact) {
-        Task {
-            do {
-                try await webRTCService.startVideoCall(to: contact.phone)
-            } catch {
-                await MainActor.run {
-                    self.error = error
-                    self.showError = true
-                }
-            }
-        }
+        Task { @MainActor in CallCoordinator.shared.startCall(to: contact, isVideo: true) }
     }
 }
 
@@ -442,8 +407,6 @@ struct ContactDetailsView: View {
     @Environment(\.presentationMode) var presentationMode
     @State private var showCallOptions = false
     @State private var showCopyAlert = false
-    @State private var showCallView = false
-    @State private var isVideoCall = false
     @State private var showChatView = false
     @State private var selectedChat: Chat?
     
@@ -514,19 +477,10 @@ struct ContactDetailsView: View {
         }
         .actionSheet(isPresented: $showCallOptions) {
             ActionSheet(title: Text("Call Options"), buttons: [
-                .default(Text("Audio Call")) { 
-                    isVideoCall = false
-                    showCallView = true
-                },
-                .default(Text("Video Call")) { 
-                    isVideoCall = true
-                    showCallView = true
-                },
+                .default(Text("Audio Call")) { callFromDetails(isVideo: false) },
+                .default(Text("Video Call")) { callFromDetails(isVideo: true) },
                 .cancel()
             ])
-        }
-        .fullScreenCover(isPresented: $showCallView) {
-            CallView(contact: contact, isVideo: isVideoCall)
         }
         .alert("Number Copied", isPresented: $showCopyAlert) {
             Button("OK", role: .cancel) { }
@@ -541,22 +495,20 @@ struct ContactDetailsView: View {
     }
     
     private func startAudioCall() {
-        Task {
-            do {
-                try await WebRTCService.shared.startCall(to: contact.phone, isVideo: false)
-            } catch {
-                debugLog("Error starting audio call: \(error)")
-            }
-        }
+        callFromDetails(isVideo: false)
     }
     
     private func startVideoCall() {
-        Task {
-            do {
-                try await WebRTCService.shared.startVideoCall(to: contact.phone)
-            } catch {
-                debugLog("Error starting video call: \(error)")
-            }
+        callFromDetails(isVideo: true)
+    }
+    
+    /// Closes this sheet, then starts the call (the call screen opens in its own window).
+    private func callFromDetails(isVideo: Bool) {
+        presentationMode.wrappedValue.dismiss()
+        let contact = contact
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)   // let the sheet finish closing
+            CallCoordinator.shared.startCall(to: contact, isVideo: isVideo)
         }
     }
     

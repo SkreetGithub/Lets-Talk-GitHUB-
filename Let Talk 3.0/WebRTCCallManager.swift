@@ -3,9 +3,16 @@ import WebRTC
 import AVFoundation
 
 // MARK: - WebRTC Call Manager
-class WebRTCCallManager: NSObject, ObservableObject {
+//
+// The ONE call engine. Every outgoing call (Chat, Contacts, Calls, Dial Pad) and every incoming
+// call goes through here; `CallCoordinator` decides what is on screen. (`WebRTCService` no longer
+// listens to signaling, so there is never a second peer connection fighting over the same call.)
+//
+// State is mutated on the main queue. WebRTC and signaling callbacks arrive on background
+// threads and hop to main before touching anything.
+final class WebRTCCallManager: NSObject, ObservableObject {
     static let shared = WebRTCCallManager()
-    
+
     @Published var isInCall = false
     @Published var isVideoEnabled = true
     @Published var isAudioEnabled = true
@@ -13,7 +20,11 @@ class WebRTCCallManager: NSObject, ObservableObject {
     @Published var callStatus: WebRTCCallStatus = .idle
     @Published var currentCall: Call?
     @Published var connectionState: RTCIceConnectionState = .new
-    
+
+    /// How long an outgoing call rings before it is marked missed, and how long an incoming call
+    /// shows before it is dismissed.
+    private let ringTimeout: UInt64 = 45
+
     private var peerConnection: RTCPeerConnection?
     private var localVideoTrack: RTCVideoTrack?
     private var remoteVideoTrack: RTCVideoTrack?
@@ -21,370 +32,340 @@ class WebRTCCallManager: NSObject, ObservableObject {
     private var remoteAudioTrack: RTCAudioTrack?
     private var videoCapturer: RTCCameraVideoCapturer?
     private var dataChannel: RTCDataChannel?
-    
+    private var usingFrontCamera = true
+
+    // Video views can be registered before the tracks exist (the call screen appears first),
+    // so keep them and attach as soon as each track arrives.
+    private weak var localRenderer: RTCMTLVideoView?
+    private weak var remoteRenderer: RTCMTLVideoView?
+
+    // ICE candidates that arrive before the remote description is set must wait, or
+    // RTCPeerConnection rejects them and the call never connects.
+    private var pendingRemoteCandidates: [RTCIceCandidate] = []
+    private var hasRemoteDescription = false
+
+    /// Read from WebRTC's threads when sending ICE candidates; set before the peer connection exists.
+    private var activeCallId: String?
+    private var handledIncomingCallIds: Set<String> = []
+    private var timeoutTask: Task<Void, Never>?
+
     private let factory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
-        let videoEncoderFactory = RTCDefaultVideoEncoderFactory()
-        let videoDecoderFactory = RTCDefaultVideoDecoderFactory()
-        return RTCPeerConnectionFactory(encoderFactory: videoEncoderFactory, decoderFactory: videoDecoderFactory)
+        return RTCPeerConnectionFactory(
+            encoderFactory: RTCDefaultVideoEncoderFactory(),
+            decoderFactory: RTCDefaultVideoDecoderFactory()
+        )
     }()
-    
-    private let configuration: RTCConfiguration = {
-        return STUNTurnConfiguration.shared.getRTCConfiguration()
-    }()
-    
-    private var signalingService = SupabaseSignalingService.shared
-    private var audioSession: RTCAudioSession?
-    
+
+    private let signalingService = SupabaseSignalingService.shared
+
     override init() {
         super.init()
-        setupAudioSession()
+        // No audio-session activation here: doing it at launch stopped the user's music as soon
+        // as the app opened. The session is configured when a call starts.
         signalingService.addDelegate(self)
         signalingService.startListeningForIncomingCalls()
     }
-    
-    // MARK: - Audio Session Setup
-    
-    private func setupAudioSession() {
-        audioSession = RTCAudioSession.sharedInstance()
-        audioSession?.lockForConfiguration()
+
+    /// True while a call is ringing, connecting or connected.
+    var isBusy: Bool {
+        switch callStatus {
+        case .idle, .ended, .failed: return false
+        default: return true
+        }
+    }
+
+    // MARK: - Outgoing
+
+    func startCall(to userId: String, isVideo: Bool = true) async throws {
+        guard let me = AuthManager.shared.currentUserId else { throw CallError.userNotAuthenticated }
+        let busy = await MainActor.run { isBusy }
+        guard !busy else { throw CallError.alreadyInCall }
+
+        await MainActor.run {
+            resetCallState()
+            isInCall = true
+            isVideoEnabled = isVideo
+            isSpeakerEnabled = isVideo          // video calls default to speaker, voice to earpiece
+            callStatus = .initiating
+        }
+        configureAudioSession(speaker: isVideo)
+        let configuration = await STUNTurnConfiguration.shared.makeConfiguration()
+
         do {
-            if let session = audioSession?.session {
-                try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker])
-                try session.setActive(true)
+            let callId = try await signalingService.createCall(to: userId, isVideo: isVideo)
+            activeCallId = callId
+            await MainActor.run {
+                currentCall = Call(id: callId, callerId: me, calleeId: userId, isVideo: isVideo,
+                                   status: .initiated, createdAt: Date(), participants: [me, userId])
+            }
+
+            createPeerConnection(configuration)
+            createMediaTracks(isVideo: isVideo)
+            createDataChannel()                  // the caller opens the subtitle channel
+            signalingService.listenForSignalingMessages(callId: callId)
+            try await createOffer(callId: callId)
+
+            startTimeout(callId: callId) { [weak self] in
+                // Nobody answered: mark the call missed so the other phone stops ringing.
+                try? await self?.signalingService.markMissed(callId: callId)
+                await self?.finish(.ended)
             }
         } catch {
-            debugLog("Error setting up audio session: \(error)")
+            await finish(.failed)
+            throw error
         }
-        audioSession?.unlockForConfiguration()
     }
-    
-    // MARK: - Call Management
-    
-    func startCall(to userId: String, isVideo: Bool = true) async throws {
-        guard !isInCall else {
-            throw CallError.alreadyInCall
-        }
-        
-        callStatus = .initiating
-        isVideoEnabled = isVideo
-        
-        // Create call in Supabase-backed signaling
-        let callId = try await signalingService.createCall(to: userId, isVideo: isVideo)
-        currentCall = Call(
-            id: callId,
-            callerId: AuthManager.shared.currentUserId ?? "",
-            calleeId: userId,
-            isVideo: isVideo,
-            status: .initiated,
-            createdAt: Date(),
-            participants: [AuthManager.shared.currentUserId ?? "", userId]
-        )
-        
-        // Create peer connection
-        createPeerConnection()
-        
-        // Create media tracks
-        createMediaTracks(isVideo: isVideo)
-        
-        // Create data channel
-        createDataChannel()
-        
-        // Create and send offer
-        try await createOffer()
-        
-        // Update call status
-        await MainActor.run {
-            self.isInCall = true
-            self.callStatus = .connecting
-        }
-        
-        // Listen for signaling messages
-        signalingService.listenForSignalingMessages(callId: callId)
-    }
-    
+
+    // MARK: - Incoming
+
     func answerCall(callId: String, isVideo: Bool = true) async throws {
-        guard !isInCall else {
-            throw CallError.alreadyInCall
+        let alreadyActive = await MainActor.run { isInCall && activeCallId == callId }
+        guard !alreadyActive else { return }
+
+        cancelTimeout()
+        activeCallId = callId
+        await MainActor.run {
+            isInCall = true
+            isVideoEnabled = isVideo
+            isSpeakerEnabled = isVideo
+            callStatus = .answering
+            if currentCall?.id != callId {
+                // Answered from CallKit before the in-app poll saw the call.
+                let me = AuthManager.shared.currentUserId ?? ""
+                currentCall = Call(id: callId, callerId: "", calleeId: me, isVideo: isVideo,
+                                   status: .answered, createdAt: Date(), participants: [me])
+            }
         }
-        
-        callStatus = .answering
-        isVideoEnabled = isVideo
-        
-        // Answer call in Supabase-backed signaling
-        try await signalingService.answerCall(callId: callId, isVideo: isVideo)
-        // Keep a local reference for subsequent signaling sends.
-        currentCall = Call(
-            id: callId,
-            callerId: currentCall?.callerId ?? "",
-            calleeId: AuthManager.shared.currentUserId ?? "",
-            isVideo: isVideo,
-            status: .answered,
-            createdAt: Date(),
-            participants: [currentCall?.callerId ?? "", AuthManager.shared.currentUserId ?? ""].filter { !$0.isEmpty }
-        )
-        
-        // Create peer connection
-        createPeerConnection()
-        
-        // Create media tracks
+        configureAudioSession(speaker: isVideo)
+        let configuration = await STUNTurnConfiguration.shared.makeConfiguration()
+
+        // Peer connection first, so the caller's offer (already in call_signals) can be applied
+        // the moment the signal poll delivers it.
+        createPeerConnection(configuration)
         createMediaTracks(isVideo: isVideo)
-        
-        // Listen for signaling messages
-        signalingService.listenForSignalingMessages(callId: callId)
-        
-        await MainActor.run {
-            self.isInCall = true
-            self.callStatus = .connected
+
+        do {
+            try await signalingService.answerCall(callId: callId, isVideo: isVideo)
+            signalingService.listenForSignalingMessages(callId: callId)
+            await MainActor.run {
+                // "Connected" is only shown once ICE actually connects (it used to be set here).
+                if callStatus == .answering { callStatus = .connecting }
+            }
+        } catch {
+            await finish(.failed)
+            throw error
         }
     }
-    
+
+    // MARK: - Hang up
+
     func endCall() async {
-        guard isInCall else { return }
-        
-        callStatus = .ending
-        
-        // End call in Supabase-backed signaling
-        if let callId = currentCall?.id {
-            try? await signalingService.endCall(callId: callId)
+        let callId = await MainActor.run { () -> String? in
+            guard isBusy || isInCall else { return nil }
+            callStatus = .ending
+            return currentCall?.id ?? activeCallId
         }
-        
-        // Clean up WebRTC resources
-        cleanup()
-        
-        await MainActor.run {
-            self.isInCall = false
-            self.callStatus = .idle
-            self.currentCall = nil
-            self.connectionState = .new
-        }
+        guard let callId else { return }
+        try? await signalingService.endCall(callId: callId)
+        await finish(.ended)
     }
-    
+
     func rejectCall() async {
-        guard let callId = currentCall?.id else { return }
-        
+        guard let callId = await MainActor.run(body: { currentCall?.id }) else { return }
         try? await signalingService.rejectCall(callId: callId)
-        
+        await finish(.ended)
+    }
+
+    /// Tears down media and returns to idle after a short pause, so the call screen can show
+    /// "Call ended" / "Call failed" before it closes.
+    private func finish(_ status: WebRTCCallStatus) async {
+        cancelTimeout()
+        if let id = activeCallId { signalingService.stopListening(callId: id) }
+        cleanup()
+        deactivateAudioSession()
+
         await MainActor.run {
-            self.callStatus = .idle
-            self.currentCall = nil
+            isInCall = false
+            callStatus = status
+            connectionState = .closed
+        }
+        try? await Task.sleep(nanoseconds: 1_200_000_000)
+        await MainActor.run {
+            guard callStatus == status else { return }   // a new call already started
+            callStatus = .idle
+            currentCall = nil
+            connectionState = .new
+            activeCallId = nil
         }
     }
-    
+
     // MARK: - Media Controls
-    
+
     func toggleVideo() {
         isVideoEnabled.toggle()
         localVideoTrack?.isEnabled = isVideoEnabled
-        
-        if !isVideoEnabled {
-            videoCapturer?.stopCapture()
-        } else {
+        if isVideoEnabled {
             startVideoCapture()
+        } else {
+            videoCapturer?.stopCapture()
         }
     }
-    
+
     func toggleAudio() {
         isAudioEnabled.toggle()
         localAudioTrack?.isEnabled = isAudioEnabled
     }
-    
+
     func toggleSpeaker() {
         isSpeakerEnabled.toggle()
-        
-        audioSession?.lockForConfiguration()
-        do {
-            if let session = audioSession?.session {
-                if isSpeakerEnabled {
-                    try session.overrideOutputAudioPort(.speaker)
-                } else {
-                    try session.overrideOutputAudioPort(.none)
-                }
-            }
-        } catch {
-            debugLog("Error toggling speaker: \(error)")
-        }
-        audioSession?.unlockForConfiguration()
+        setSpeaker(isSpeakerEnabled)
     }
-    
+
     func switchCamera() {
         guard let capturer = videoCapturer else { return }
-        
-        let currentPosition = getCurrentCameraPosition()
-        let newPosition: AVCaptureDevice.Position = currentPosition == .front ? .back : .front
-        
-        guard let device = getCameraDevice(position: newPosition) else { return }
-        guard let format = getBestFormat(for: device) else { return }
-        
+        usingFrontCamera.toggle()
+        guard let device = getCameraDevice(position: usingFrontCamera ? .front : .back),
+              let format = getBestFormat(for: device) else { return }
         capturer.stopCapture {
             capturer.startCapture(with: device, format: format, fps: 30)
         }
     }
-    
+
     // MARK: - Video Views
-    
+
     func setLocalVideoView(_ view: RTCMTLVideoView) {
-        localVideoTrack?.add(view)
-    }
-    
-    func setRemoteVideoView(_ view: RTCMTLVideoView) {
-        remoteVideoTrack?.add(view)
-    }
-    
-    // MARK: - Private Methods
-    
-    private func createPeerConnection() {
-        let constraints = RTCMediaConstraints(
-            mandatoryConstraints: [
-                "OfferToReceiveAudio": "true",
-                "OfferToReceiveVideo": "true"
-            ],
-            optionalConstraints: nil
-        )
-        
-        peerConnection = factory.peerConnection(
-            with: configuration,
-            constraints: constraints,
-            delegate: self
-        )
-    }
-    
-    private func createMediaTracks(isVideo: Bool) {
-        // Create audio track
-        let audioSource = factory.audioSource(with: nil)
-        localAudioTrack = factory.audioTrack(with: audioSource, trackId: "audio0")
-        peerConnection?.add(localAudioTrack!, streamIds: ["stream0"])
-        
-        if isVideo {
-            // Create video track
-            let videoSource = factory.videoSource()
-            videoCapturer = RTCCameraVideoCapturer(delegate: videoSource)
-            localVideoTrack = factory.videoTrack(with: videoSource, trackId: "video0")
-            peerConnection?.add(localVideoTrack!, streamIds: ["stream0"])
-            
-            startVideoCapture()
+        DispatchQueue.main.async {
+            self.localRenderer = view
+            self.localVideoTrack?.add(view)
         }
     }
-    
-    private func startVideoCapture() {
-        guard let capturer = videoCapturer else { return }
-        
-        let device = getCameraDevice(position: .front) ?? getCameraDevice(position: .back)
-        guard let cameraDevice = device else { return }
-        guard let format = getBestFormat(for: cameraDevice) else { return }
-        
-        capturer.startCapture(with: cameraDevice, format: format, fps: 30)
+
+    func setRemoteVideoView(_ view: RTCMTLVideoView) {
+        DispatchQueue.main.async {
+            self.remoteRenderer = view
+            self.remoteVideoTrack?.add(view)
+        }
     }
-    
+
     /// Sends a small payload (live-translation subtitles) to the other participant.
     func sendData(_ data: Data) {
         guard let channel = dataChannel, channel.readyState == .open else { return }
         channel.sendData(RTCDataBuffer(data: data, isBinary: false))
     }
 
+    // MARK: - Peer connection
+
+    private func createPeerConnection(_ configuration: RTCConfiguration) {
+        let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
+        peerConnection = factory.peerConnection(with: configuration, constraints: constraints, delegate: self)
+    }
+
+    private func createMediaTracks(isVideo: Bool) {
+        let audioSource = factory.audioSource(with: nil)
+        let audioTrack = factory.audioTrack(with: audioSource, trackId: "audio0")
+        localAudioTrack = audioTrack
+        peerConnection?.add(audioTrack, streamIds: ["stream0"])
+
+        guard isVideo else { return }
+        let videoSource = factory.videoSource()
+        videoCapturer = RTCCameraVideoCapturer(delegate: videoSource)
+        let videoTrack = factory.videoTrack(with: videoSource, trackId: "video0")
+        localVideoTrack = videoTrack
+        peerConnection?.add(videoTrack, streamIds: ["stream0"])
+        startVideoCapture()   // no-op on the Simulator (no camera)
+
+        DispatchQueue.main.async {
+            if let renderer = self.localRenderer { videoTrack.add(renderer) }
+        }
+    }
+
+    private func startVideoCapture() {
+        guard let capturer = videoCapturer,
+              let device = getCameraDevice(position: usingFrontCamera ? .front : .back)
+                ?? getCameraDevice(position: .back),
+              let format = getBestFormat(for: device) else { return }
+        capturer.startCapture(with: device, format: format, fps: 30)
+    }
+
     private func createDataChannel() {
         let config = RTCDataChannelConfiguration()
         config.isOrdered = true
-        config.isNegotiated = false
-        
-        dataChannel = peerConnection?.dataChannel(forLabel: "dataChannel", configuration: config)
+        dataChannel = peerConnection?.dataChannel(forLabel: "subtitles", configuration: config)
         dataChannel?.delegate = self
     }
-    
-    private func createOffer() async throws {
-        let constraints = RTCMediaConstraints(
-            mandatoryConstraints: [
-                "OfferToReceiveAudio": "true",
-                "OfferToReceiveVideo": "true"
-            ],
+
+    private func offerAnswerConstraints() -> RTCMediaConstraints {
+        RTCMediaConstraints(
+            mandatoryConstraints: ["OfferToReceiveAudio": "true", "OfferToReceiveVideo": "true"],
             optionalConstraints: nil
         )
-        
-        return try await withCheckedThrowingContinuation { continuation in
-            peerConnection?.offer(for: constraints) { [weak self] sdp, error in
-                guard let self = self else {
-                    continuation.resume(throwing: CallError.unknown)
-                    return
-                }
-                
-                if let error = error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                
-                guard let sdp = sdp else {
-                    continuation.resume(throwing: CallError.unknown)
-                    return
-                }
-                
-                self.peerConnection?.setLocalDescription(sdp) { error in
-                    if let error = error {
-                        continuation.resume(throwing: error)
-                        return
-                    }
-                    
-                    Task {
-                        do {
-                            try await self.signalingService.sendOffer(callId: self.currentCall?.id ?? "", offer: sdp)
-                            continuation.resume()
-                        } catch {
-                            continuation.resume(throwing: error)
-                        }
-                    }
-                }
+    }
+
+    private func createOffer(callId: String) async throws {
+        guard let pc = peerConnection else { throw CallError.unknown }
+        let sdp: RTCSessionDescription = try await withCheckedThrowingContinuation { continuation in
+            pc.offer(for: offerAnswerConstraints()) { sdp, error in
+                if let sdp { continuation.resume(returning: sdp) }
+                else { continuation.resume(throwing: error ?? CallError.unknown) }
+            }
+        }
+        try await setLocalDescription(sdp, on: pc)
+        try await signalingService.sendOffer(callId: callId, offer: sdp)
+    }
+
+    private func createAnswer(callId: String) async throws {
+        guard let pc = peerConnection else { throw CallError.unknown }
+        let sdp: RTCSessionDescription = try await withCheckedThrowingContinuation { continuation in
+            pc.answer(for: offerAnswerConstraints()) { sdp, error in
+                if let sdp { continuation.resume(returning: sdp) }
+                else { continuation.resume(throwing: error ?? CallError.unknown) }
+            }
+        }
+        try await setLocalDescription(sdp, on: pc)
+        try await signalingService.sendAnswer(callId: callId, answer: sdp)
+    }
+
+    private func setLocalDescription(_ sdp: RTCSessionDescription, on pc: RTCPeerConnection) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            pc.setLocalDescription(sdp) { error in
+                if let error { continuation.resume(throwing: error) } else { continuation.resume() }
             }
         }
     }
-    
-    private func createAnswer() async throws {
-        let constraints = RTCMediaConstraints(
-            mandatoryConstraints: [
-                "OfferToReceiveAudio": "true",
-                "OfferToReceiveVideo": "true"
-            ],
-            optionalConstraints: nil
-        )
-        
-        return try await withCheckedThrowingContinuation { continuation in
-            peerConnection?.answer(for: constraints) { [weak self] sdp, error in
-                guard let self = self else {
-                    continuation.resume(throwing: CallError.unknown)
-                    return
-                }
-                
-                if let error = error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                
-                guard let sdp = sdp else {
-                    continuation.resume(throwing: CallError.unknown)
-                    return
-                }
-                
-                self.peerConnection?.setLocalDescription(sdp) { error in
-                    if let error = error {
-                        continuation.resume(throwing: error)
-                        return
-                    }
-                    
-                    Task {
-                        do {
-                            try await self.signalingService.sendAnswer(callId: self.currentCall?.id ?? "", answer: sdp)
-                            continuation.resume()
-                        } catch {
-                            continuation.resume(throwing: error)
-                        }
-                    }
-                }
+
+    private func setRemoteDescription(_ sdp: RTCSessionDescription) async throws {
+        guard let pc = peerConnection else { throw CallError.unknown }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            pc.setRemoteDescription(sdp) { error in
+                if let error { continuation.resume(throwing: error) } else { continuation.resume() }
             }
         }
+        // Now that the remote description is in place, apply candidates that arrived early.
+        let queued: [RTCIceCandidate] = await MainActor.run {
+            hasRemoteDescription = true
+            defer { pendingRemoteCandidates.removeAll() }
+            return pendingRemoteCandidates
+        }
+        for candidate in queued { pc.add(candidate) { _ in } }
     }
-    
+
+    // MARK: - Cleanup / state
+
+    private func resetCallState() {
+        pendingRemoteCandidates.removeAll()
+        hasRemoteDescription = false
+        remoteVideoTrack = nil
+        connectionState = .new
+        isAudioEnabled = true
+        usingFrontCamera = true
+    }
+
     private func cleanup() {
         videoCapturer?.stopCapture()
+        dataChannel?.close()
         peerConnection?.close()
-        
+
         localVideoTrack = nil
         remoteVideoTrack = nil
         localAudioTrack = nil
@@ -392,21 +373,94 @@ class WebRTCCallManager: NSObject, ObservableObject {
         dataChannel = nil
         peerConnection = nil
         videoCapturer = nil
+        DispatchQueue.main.async {
+            self.pendingRemoteCandidates.removeAll()
+            self.hasRemoteDescription = false
+        }
     }
-    
+
+    // MARK: - Timeouts
+
+    private func startTimeout(callId: String, onTimeout: @escaping () async -> Void) {
+        cancelTimeout()
+        let seconds = ringTimeout
+        timeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            let stillRinging = await MainActor.run {
+                self.activeCallId == callId
+                    && (self.callStatus == .initiating || self.callStatus == .incoming)
+            }
+            if stillRinging { await onTimeout() }
+        }
+    }
+
+    private func cancelTimeout() {
+        timeoutTask?.cancel()
+        timeoutTask = nil
+    }
+
+    // MARK: - Audio session (only active during a call)
+
+    private func configureAudioSession(speaker: Bool) {
+        let rtcSession = RTCAudioSession.sharedInstance()
+        rtcSession.lockForConfiguration()
+        defer { rtcSession.unlockForConfiguration() }
+        do {
+            let session = rtcSession.session
+            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .allowBluetoothA2DP])
+            try session.setActive(true)
+            try session.overrideOutputAudioPort(speaker ? .speaker : .none)
+        } catch {
+            debugLog("Audio session setup failed: \(error)")
+        }
+    }
+
+    private func setSpeaker(_ on: Bool) {
+        let rtcSession = RTCAudioSession.sharedInstance()
+        rtcSession.lockForConfiguration()
+        defer { rtcSession.unlockForConfiguration() }
+        do {
+            try rtcSession.session.overrideOutputAudioPort(on ? .speaker : .none)
+        } catch {
+            debugLog("Error toggling speaker: \(error)")
+        }
+    }
+
+    private func deactivateAudioSession() {
+        let rtcSession = RTCAudioSession.sharedInstance()
+        rtcSession.lockForConfiguration()
+        defer { rtcSession.unlockForConfiguration() }
+        // Lets the user's music resume after the call.
+        try? rtcSession.session.setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
     // MARK: - Camera Helpers
-    
-    private func getCurrentCameraPosition() -> AVCaptureDevice.Position {
-        // This would need to be tracked in a real implementation
-        return .front
-    }
-    
+
     private func getCameraDevice(position: AVCaptureDevice.Position) -> AVCaptureDevice? {
-        return RTCCameraVideoCapturer.captureDevices().first { $0.position == position }
+        RTCCameraVideoCapturer.captureDevices().first { $0.position == position }
     }
-    
+
+    /// A 720p-ish format at 30 fps; the old code took the first (lowest) format.
     private func getBestFormat(for device: AVCaptureDevice) -> AVCaptureDevice.Format? {
-        return RTCCameraVideoCapturer.supportedFormats(for: device).first
+        let formats = RTCCameraVideoCapturer.supportedFormats(for: device)
+        let target: Int32 = 1280
+        return formats
+            .filter { format in format.videoSupportedFrameRateRanges.contains { $0.maxFrameRate >= 30 } }
+            .min { a, b in
+                abs(CMVideoFormatDescriptionGetDimensions(a.formatDescription).width - target)
+                    < abs(CMVideoFormatDescriptionGetDimensions(b.formatDescription).width - target)
+            } ?? formats.last
+    }
+
+    // MARK: - Remote media
+
+    private func attachRemoteVideo(_ track: RTCVideoTrack) {
+        DispatchQueue.main.async {
+            guard self.remoteVideoTrack !== track else { return }
+            self.remoteVideoTrack = track
+            if let renderer = self.remoteRenderer { track.add(renderer) }
+        }
     }
 }
 
@@ -416,69 +470,54 @@ extension WebRTCCallManager: RTCPeerConnectionDelegate {
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {
         debugLog("Signaling state changed: \(stateChanged.rawValue)")
     }
-    
+
     func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {
-        debugLog("Stream added")
-        
-        if let videoTrack = stream.videoTracks.first {
-            remoteVideoTrack = videoTrack
-        }
-        
-        if let audioTrack = stream.audioTracks.first {
-            remoteAudioTrack = audioTrack
-        }
+        if let videoTrack = stream.videoTracks.first { attachRemoteVideo(videoTrack) }
+        if let audioTrack = stream.audioTracks.first { remoteAudioTrack = audioTrack }
     }
-    
-    func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {
-        debugLog("Stream removed")
+
+    /// Unified Plan delivers remote tracks here.
+    func peerConnection(_ peerConnection: RTCPeerConnection, didAdd rtpReceiver: RTCRtpReceiver, streams mediaStreams: [RTCMediaStream]) {
+        if let videoTrack = rtpReceiver.track as? RTCVideoTrack { attachRemoteVideo(videoTrack) }
+        if let audioTrack = rtpReceiver.track as? RTCAudioTrack { remoteAudioTrack = audioTrack }
     }
-    
-    func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {
-        debugLog("Negotiation needed")
-    }
-    
+
+    func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {}
+
+    func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {}
+
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceConnectionState) {
         debugLog("ICE connection state changed: \(newState.rawValue)")
-        
         DispatchQueue.main.async {
             self.connectionState = newState
-            
             switch newState {
             case .connected, .completed:
-                self.callStatus = .connected
+                if self.callStatus != .ending { self.callStatus = .connected }
             case .disconnected:
-                self.callStatus = .disconnected
+                // Often recovers by itself (network switch); show it but don't end the call.
+                if self.callStatus == .connected { self.callStatus = .disconnected }
             case .failed:
-                self.callStatus = .failed
-            case .closed:
-                self.callStatus = .ended
+                // ICE could not find any path (typically no TURN on a strict NAT).
+                Task { await self.finish(.failed) }
             default:
                 break
             }
         }
     }
-    
-    func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {
-        debugLog("ICE gathering state changed: \(newState.rawValue)")
-    }
-    
+
+    func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {}
+
     func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
-        debugLog("Generated ICE candidate")
-        
+        guard let callId = activeCallId else { return }
         Task {
-            try? await signalingService.sendIceCandidate(
-                callId: currentCall?.id ?? "",
-                candidate: candidate
-            )
+            try? await signalingService.sendIceCandidate(callId: callId, candidate: candidate)
         }
     }
-    
-    func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {
-        debugLog("ICE candidates removed")
-    }
-    
+
+    func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
+
     func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
-        // The callee receives the channel created by the caller.
+        // The callee receives the subtitle channel the caller created.
         dataChannel.delegate = self
         self.dataChannel = dataChannel
     }
@@ -490,7 +529,7 @@ extension WebRTCCallManager: RTCDataChannelDelegate {
     func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {
         debugLog("Data channel state changed: \(dataChannel.readyState.rawValue)")
     }
-    
+
     func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
         let data = buffer.data
         Task { @MainActor in
@@ -502,79 +541,89 @@ extension WebRTCCallManager: RTCDataChannelDelegate {
 // MARK: - SupabaseSignalingDelegate
 
 extension WebRTCCallManager: SupabaseSignalingDelegate {
-    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveCallUpdate call: Call) {
-        DispatchQueue.main.async {
-            self.currentCall = call
-        }
-    }
-    
     func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveIncomingCall call: Call) {
         DispatchQueue.main.async {
+            // Ignore while busy, and never re-ring a call we've already shown.
+            guard !self.isBusy, !self.handledIncomingCallIds.contains(call.id) else { return }
+            self.handledIncomingCallIds.insert(call.id)
+            self.resetCallState()
+            self.activeCallId = call.id
             self.currentCall = call
             self.callStatus = .incoming
-        }
-    }
-    
-    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveSignalingMessage message: SignalingMessage) {
-        switch message.type {
-        case .offer:
-            handleOffer(message: message)
-        case .answer:
-            handleAnswer(message: message)
-        case .iceCandidate:
-            handleIceCandidate(message: message)
-        case .callEnd:
-            Task {
-                await endCall()
+            // Watch the call row so we stop ringing if the caller hangs up first.
+            self.signalingService.watchCall(callId: call.id)
+            self.startTimeout(callId: call.id) { [weak self] in
+                await self?.finish(.ended)
             }
         }
     }
-    
-    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveError error: Error) {
-        debugLog("Signaling error: \(error)")
+
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveCallUpdate call: Call) {
         DispatchQueue.main.async {
-            self.callStatus = .failed
-        }
-    }
-    
-    private func handleOffer(message: SignalingMessage) {
-        guard let sdp = message.sdp else { return }
-        
-        let offer = RTCSessionDescription(type: .offer, sdp: sdp)
-        peerConnection?.setRemoteDescription(offer) { [weak self] error in
-            if let error = error {
-                debugLog("Error setting remote description: \(error)")
-                return
-            }
-            
-            Task {
-                try? await self?.createAnswer()
+            guard call.id == self.activeCallId else { return }
+            switch call.status {
+            case .rejected, .ended, .missed:
+                // The other side declined, hung up, or the ring timed out.
+                guard self.callStatus != .ending, self.isBusy || self.isInCall else { return }
+                Task { await self.finish(.ended) }
+            case .answered:
+                if self.callStatus == .initiating {
+                    self.cancelTimeout()
+                    self.callStatus = .connecting
+                }
+            default:
+                break
             }
         }
     }
-    
-    private func handleAnswer(message: SignalingMessage) {
-        guard let sdp = message.sdp else { return }
-        
-        let answer = RTCSessionDescription(type: .answer, sdp: sdp)
-        peerConnection?.setRemoteDescription(answer) { error in
-            if let error = error {
-                debugLog("Error setting remote description: \(error)")
+
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveSignalingMessage message: SignalingMessage) {
+        DispatchQueue.main.async {
+            guard message.callId == self.activeCallId else { return }
+            switch message.type {
+            case .offer:
+                guard let sdp = message.sdp, !self.hasRemoteDescription else { return }
+                let callId = message.callId
+                Task {
+                    do {
+                        try await self.setRemoteDescription(RTCSessionDescription(type: .offer, sdp: sdp))
+                        try await self.createAnswer(callId: callId)
+                    } catch {
+                        debugLog("Answering offer failed: \(error)")
+                        await self.finish(.failed)
+                    }
+                }
+            case .answer:
+                guard let sdp = message.sdp, !self.hasRemoteDescription else { return }
+                Task {
+                    do {
+                        try await self.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: sdp))
+                    } catch {
+                        debugLog("Applying answer failed: \(error)")
+                        await self.finish(.failed)
+                    }
+                }
+            case .iceCandidate:
+                guard let candidate = message.candidate,
+                      let index = message.sdpMLineIndex else { return }
+                let ice = RTCIceCandidate(sdp: candidate, sdpMLineIndex: index, sdpMid: message.sdpMid)
+                if self.hasRemoteDescription, let pc = self.peerConnection {
+                    pc.add(ice) { error in
+                        if let error { debugLog("Error adding ICE candidate: \(error)") }
+                    }
+                } else {
+                    self.pendingRemoteCandidates.append(ice)
+                }
+            case .callEnd:
+                Task { await self.finish(.ended) }
             }
         }
     }
-    
-    private func handleIceCandidate(message: SignalingMessage) {
-        guard let candidate = message.candidate,
-              let sdpMLineIndex = message.sdpMLineIndex,
-              let sdpMid = message.sdpMid else { return }
-        
-        let iceCandidate = RTCIceCandidate(sdp: candidate, sdpMLineIndex: sdpMLineIndex, sdpMid: sdpMid)
-        peerConnection?.add(iceCandidate) { error in
-            if let error = error {
-                debugLog("Error adding ICE candidate: \(error)")
-            }
-        }
+
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveError error: Error) {
+        // Polling errors are usually transient (a dropped request); the next poll retries.
+        // They used to set callStatus = .failed and kill the call.
+        debugLog("Signaling error: \(error)")
     }
 }
 
@@ -599,18 +648,24 @@ enum CallError: Error, LocalizedError {
     case alreadyInCall
     case userNotAuthenticated
     case networkError
+    case notOnLetTalk(String)
+    case cannotCallYourself
     case unknown
-    
+
     var errorDescription: String? {
         switch self {
         case .alreadyInCall:
-            return "Already in a call"
+            return "You're already in a call."
         case .userNotAuthenticated:
-            return "User not authenticated"
+            return "Please sign in again."
         case .networkError:
-            return "Network error"
+            return "Network error. Check your connection and try again."
+        case .notOnLetTalk(let who):
+            return "\(who) isn't on Let Talk yet."
+        case .cannotCallYourself:
+            return "You can't call your own number."
         case .unknown:
-            return "Unknown error"
+            return "The call couldn't be started."
         }
     }
 }

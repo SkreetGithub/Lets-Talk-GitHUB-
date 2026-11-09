@@ -17,7 +17,6 @@ class ChatDetailViewModel: ObservableObject {
     
     private let chat: Chat
     private let databaseManager = DatabaseManager.shared
-    private let webRTCService = WebRTCService()
     private var cancellables = Set<AnyCancellable>()
     private var audioRecorder: AVAudioRecorder?
     private var audioRecordingURL: URL?
@@ -289,22 +288,23 @@ class ChatDetailViewModel: ObservableObject {
         }
     }
     
+    // The chat's other participant IS a Let Talk user: call their user ID directly.
+    // (This used to pass contact.phone as the callee ID, so the other phone never rang.)
     func startAudioCall() {
-        Task {
-            do {
-                try await webRTCService.startCall(to: contact.phone)
-            } catch {
-                self.error = error
-            }
-        }
+        startCall(isVideo: false)
     }
     
     func startVideoCall() {
-        Task {
-            do {
-                try await webRTCService.startVideoCall(to: contact.phone)
-            } catch {
-                self.error = error
+        startCall(isVideo: true)
+    }
+    
+    private func startCall(isVideo: Bool) {
+        let otherUserId = chat.participants.first { $0 != AuthManager.shared.currentUserId }
+        Task { @MainActor in
+            if let otherUserId {
+                CallCoordinator.shared.startCall(toUserId: otherUserId, isVideo: isVideo)
+            } else {
+                CallCoordinator.shared.startCall(to: contact, isVideo: isVideo)
             }
         }
     }

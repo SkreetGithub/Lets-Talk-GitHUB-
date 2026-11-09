@@ -15,7 +15,8 @@ class IncomingCallManager: ObservableObject {
     private var ringtoneTimer: Timer?
     
     private init() {
-        setupAudioSession()
+        // No audio-session activation at init: this object is created at launch, and activating
+        // .playAndRecord there stopped the user's music as soon as the app opened.
     }
     
     // MARK: - Audio Session Setup

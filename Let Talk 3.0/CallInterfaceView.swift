@@ -68,7 +68,7 @@ struct CallInterfaceView: View {
     private var videoViews: some View {
         ZStack {
             // Remote video (full screen)
-            if callManager.isInCall && callManager.connectionState == .connected {
+            if callManager.isInCall && (callManager.connectionState == .connected || callManager.connectionState == .completed) {
                 RemoteVideoView(remoteVideoView: $remoteVideoView)
                     .ignoresSafeArea()
             } else {

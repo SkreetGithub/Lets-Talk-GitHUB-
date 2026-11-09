@@ -59,9 +59,10 @@ class WebRTCService: NSObject {
     
     override init() {
         super.init()
-        setupAudioSession()
-        signalingService.addDelegate(self)
-        signalingService.startListeningForIncomingCalls()
+        // Deliberately does NOT register for signaling or poll for incoming calls any more:
+        // WebRTCCallManager is the only call engine. Two engines on the same signaling stream
+        // built competing peer connections for every call. No audio-session activation here
+        // either (it stopped the user's music when the app launched).
     }
     
     private func setupAudioSession() {

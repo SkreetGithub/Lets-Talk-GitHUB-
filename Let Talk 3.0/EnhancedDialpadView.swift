@@ -9,7 +9,6 @@ struct EnhancedDialpadView: View {
     @State private var showInvalidNumberAlert = false
     @State private var searchText = ""
     @State private var showContacts = false
-    @State private var webRTCService: WebRTCService?
     
     var body: some View {
         ZStack {
@@ -285,38 +284,15 @@ struct EnhancedDialpadView: View {
     }
     
     private func makeCall(isVideo: Bool) {
-        // Implement call functionality
-        let phoneNumber = phoneNumber.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
-        
-        // Start the call using WebRTCService
-        Task {
-            do {
-                let webRTCService = WebRTCService()
-                self.webRTCService = webRTCService
-                try await webRTCService.startCall(to: phoneNumber, isVideo: isVideo)
-                
-                // Navigate to call view
-                await MainActor.run {
-                    dismissDialpad()
-                    // Post notification to navigate to call view
-                    NotificationCenter.default.post(
-                        name: NSNotification.Name("StartCall"),
-                        object: nil,
-                        userInfo: [
-                            "phoneNumber": phoneNumber,
-                            "isVideo": isVideo,
-                            "webRTCService": webRTCService
-                        ]
-                    )
-                }
-            } catch {
-                await MainActor.run {
-                    debugLog("Failed to start call: \(error)")
-                    // Show error alert
-                    showInvalidNumberAlert = true
-                }
-            }
+        let digits = phoneNumber.replacingOccurrences(of: "[^0-9+]", with: "", options: .regularExpression)
+        guard digits.filter(\.isNumber).count >= 7 else {
+            showInvalidNumberAlert = true
+            return
         }
+        // Close the dial pad, then look up who owns the number and call it. (This used to create
+        // a throwaway WebRTCService and call the phone number as if it were a user ID.)
+        dismissDialpad()
+        CallCoordinator.shared.startCall(toPhone: digits, isVideo: isVideo)
     }
     
     private func dismissDialpad() {
