@@ -243,8 +243,10 @@ class SpeechRecognizer {
                     }
                     return
                 }
-                
-                self?.setupRecognition(language: language, completion: completion)
+                // AVAudioEngine setup must happen on the main thread.
+                DispatchQueue.main.async {
+                    self?.setupRecognition(language: language, completion: completion)
+                }
             }
         }
     }
@@ -263,16 +265,23 @@ class SpeechRecognizer {
             return
         }
         
-        // Setup audio session
-        audioSession = AVAudioSession.sharedInstance()
-        do {
-            try audioSession?.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
-            try audioSession?.setActive(true, options: .notifyOthersOnDeactivation)
-        } catch {
-            Task { @MainActor in
-                completion(.failure(error))
+        // Setup audio session. During a call WebRTC already owns a .playAndRecord/.voiceChat session:
+        // leave it alone (switching mode/route here broke the call's audio). Only configure it when
+        // nothing else has.
+        let session = AVAudioSession.sharedInstance()
+        if session.category != .playAndRecord {
+            do {
+                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+                try session.setActive(true, options: .notifyOthersOnDeactivation)
+                audioSession = session          // we activated it, so we deactivate it later
+            } catch {
+                Task { @MainActor in
+                    completion(.failure(error))
+                }
+                return
             }
-            return
+        } else {
+            audioSession = nil                  // someone else (the call) owns the session
         }
         
         audioEngine = AVAudioEngine()
@@ -315,6 +324,19 @@ class SpeechRecognizer {
         }
         
         let recordingFormat = inputNode.outputFormat(forBus: 0)
+        // With the mic held by the call, the input format can come back as 0 Hz / 0 channels.
+        // installTap with that format raises an Objective-C exception and kills the app (the crash
+        // seen when a call connected), so fail softly instead.
+        guard recordingFormat.sampleRate > 0, recordingFormat.channelCount > 0 else {
+            self.recognitionTask?.cancel()
+            self.recognitionTask = nil
+            self.recognitionRequest = nil
+            self.audioEngine = nil
+            Task { @MainActor in
+                completion(.failure(SpeechRecognitionError.audioEngineError))
+            }
+            return
+        }
         
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
             self?.recognitionRequest?.append(buffer)
@@ -333,7 +355,7 @@ class SpeechRecognizer {
     func stopRecording() {
         // Stop audio engine safely
         if let audioEngine = audioEngine {
-            audioEngine.stop()
+            if audioEngine.isRunning { audioEngine.stop() }
             audioEngine.inputNode.removeTap(onBus: 0)
         }
         
@@ -343,11 +365,13 @@ class SpeechRecognizer {
         // Cancel recognition task
         recognitionTask?.cancel()
         
-        // Clean up audio session
-        do {
-            try audioSession?.setActive(false, options: .notifyOthersOnDeactivation)
-        } catch {
-            debugLog("Error deactivating audio session: \(error)")
+        // Deactivate the audio session only if we activated it (never mid-call: that cut the call's audio).
+        if let audioSession {
+            do {
+                try audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+            } catch {
+                debugLog("Error deactivating audio session: \(error)")
+            }
         }
         
         // Clear references

@@ -43,6 +43,7 @@ final class LiveTranslationSession: ObservableObject {
     @Published var errorMessage: String?
 
     private let recognizer = SpeechRecognizer()
+    private var consecutiveFailures = 0
     private let synthesizer = AVSpeechSynthesizer()
     private var debounceTask: Task<Void, Never>?
     private var lastSent = ""
@@ -65,6 +66,7 @@ final class LiveTranslationSession: ObservableObject {
         isActive = true
         errorMessage = nil
         lastSent = ""
+        consecutiveFailures = 0
         sendPacket(Packet(type: "lang", lang: myLanguage.code, source: nil, original: nil, translated: nil))
         listen()
     }
@@ -95,10 +97,23 @@ final class LiveTranslationSession: ObservableObject {
                 guard let self, self.isActive else { return }
                 switch result {
                 case .success(let text):
+                    self.consecutiveFailures = 0
                     self.handlePartial(text)
-                case .failure:
+                case .failure(let error):
                     // The recognizer ends after silence/final result; restart while the call is active.
-                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    // Permission or microphone failures won't fix themselves, so back off instead of
+                    // retrying every 0.4 s forever.
+                    let hardFailure = (error as? SpeechRecognitionError).map {
+                        $0 == .notAuthorized || $0 == .audioEngineError
+                    } ?? false
+                    if hardFailure {
+                        self.consecutiveFailures += 1
+                        if self.consecutiveFailures >= 3 {
+                            self.errorMessage = "Live translation couldn't use the microphone."
+                            return
+                        }
+                    }
+                    try? await Task.sleep(nanoseconds: hardFailure ? 2_000_000_000 : 400_000_000)
                     if self.isActive { self.listen() }
                 }
             }

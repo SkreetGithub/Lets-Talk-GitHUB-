@@ -15,6 +15,9 @@ struct CallInterfaceView: View {
     @State private var callTimer: Timer?
     @StateObject private var liveTranslation = LiveTranslationSession.shared
     @State private var otherPartyName: String?
+    // The consent prompt must be shown from the call screen: it sits in its own window above the
+    // app, so the app-level consent sheet opened invisibly behind it and translation never started.
+    @ObservedObject private var consent = AIConsent.shared
     
     let call: Call
     let isIncoming: Bool
@@ -52,6 +55,13 @@ struct CallInterfaceView: View {
         }
         .onTapGesture {
             toggleControls()
+        }
+        .sheet(isPresented: $consent.needsPrompt) {
+            AIConsentView()
+        }
+        .onChange(of: consent.hasConsented) { _, granted in
+            // Start translating as soon as the user agrees mid-call.
+            if granted && callManager.callStatus == .connected { liveTranslation.start() }
         }
         .onChange(of: callManager.callStatus) { _, status in
             if status == .connected {
