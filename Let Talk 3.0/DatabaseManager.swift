@@ -180,15 +180,19 @@ final class DatabaseManager: ObservableObject {
         let digits = raw.filter(\.isNumber)
         guard digits.count >= 7 else { return nil }
         let last10 = String(digits.suffix(10))
-        var candidates: Set<String> = [raw, digits, "+" + digits, last10, "1" + last10, "+1" + last10]
+        var candidates: Set<String> = [digits, last10, "1" + last10]
         if last10.count == 10 {
             let a = last10.prefix(3), b = last10.dropFirst(3).prefix(3), c = last10.suffix(4)
-            candidates.formUnion(["(\(a)) \(b)-\(c)", "\(a)-\(b)-\(c)", "+1 (\(a)) \(b)-\(c)", "\(a) \(b) \(c)"])
+            candidates.formUnion(["(\(a)) \(b)-\(c)", "\(a)-\(b)-\(c)", "\(a) \(b) \(c)"])
         }
 
+        // PostgREST needs values containing ( ) , or spaces to be double-quoted inside in.(...),
+        // and supabase-swift does not quote them, so the old query never matched "(470) 789-6062".
+        // "+" variants are left out: an unescaped "+" in a query string is decoded as a space.
+        let quoted = candidates.map { "\"\($0)\"" }
         let response = try await client.from("profiles")
             .select("id, phone")
-            .in("phone", values: Array(candidates))
+            .in("phone", values: quoted)
             .limit(5)
             .execute()
 

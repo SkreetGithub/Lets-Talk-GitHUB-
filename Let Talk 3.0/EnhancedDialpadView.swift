@@ -75,12 +75,11 @@ struct EnhancedDialpadView: View {
                 // Animate in
             }
         }
-        .actionSheet(isPresented: $showCallOptions) {
-            ActionSheet(title: Text("Call Options"), buttons: [
-                .default(Text("Audio Call")) { makeCall(isVideo: false) },
-                .default(Text("Video Call")) { makeCall(isVideo: true) },
-                .cancel()
-            ])
+        // Modern replacement for ActionSheet (deprecated), whose buttons were dropping taps.
+        .confirmationDialog("Call Options", isPresented: $showCallOptions, titleVisibility: .visible) {
+            Button("Audio Call") { makeCall(isVideo: false) }
+            Button("Video Call") { makeCall(isVideo: true) }
+            Button("Cancel", role: .cancel) { }
         }
         .alert("Invalid Number", isPresented: $showInvalidNumberAlert) {
             Button("OK", role: .cancel) { }
