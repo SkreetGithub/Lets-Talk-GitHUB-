@@ -112,16 +112,23 @@ class ChatDetailViewModel: ObservableObject {
     
     private func markMessagesAsRead(_ messages: [Message]) {
         let unreadMessages = messages.filter { message in
-            message.senderId != AuthManager.shared.currentUserId &&
-            message.status != .read &&
+            message.senderId.lowercased() != AuthManager.shared.currentUserId?.lowercased() &&
+            message.readAt == nil &&
             !readReceiptsSent.contains(message.id)
         }
         
         guard !unreadMessages.isEmpty else { return }
-        readReceiptsSent.formUnion(unreadMessages.map(\.id))
-        
+        let ids = unreadMessages.map(\.id)
+        readReceiptsSent.formUnion(ids)
+
+        // Runs while the chat is on screen, so a message counts as read once it's been shown.
         Task {
-            try? await databaseManager.markMessagesAsRead(unreadMessages.map { $0.id })
+            do {
+                try await databaseManager.markMessagesAsRead(ids)
+            } catch {
+                // Try again on the next refresh.
+                await MainActor.run { self.readReceiptsSent.subtract(ids) }
+            }
         }
     }
     
@@ -197,7 +204,7 @@ class ChatDetailViewModel: ObservableObject {
                     id: messageId,
                     url: uploadedURL,
                     type: .document,
-                    size: try await url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0,
+                    size: try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0,
                     name: url.lastPathComponent
                 )
                 
@@ -315,7 +322,7 @@ class ChatDetailViewModel: ObservableObject {
                     id: messageId,
                     url: uploadedURL,
                     type: .audio,
-                    size: try await url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0,
+                    size: try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0,
                     name: "Voice Message"
                 )
                 
@@ -406,24 +413,17 @@ class ChatDetailViewModel: ObservableObject {
     
     private func uploadDocument(_ url: URL, messageId: String) async throws -> String {
         let data = try Data(contentsOf: url)
-        let fileName = "\(messageId)_\(url.lastPathComponent)"
-        return try await SupabaseStorageService.shared.uploadFile(
+        return try await SupabaseStorageService.shared.uploadChatFile(
             data,
-            fileName: fileName,
-            folder: "chat_files/\(chat.id)",
+            chatId: chat.id,
+            fileName: "\(messageId)_\(url.lastPathComponent)",
             contentType: "application/octet-stream"
         )
     }
     
     private func uploadAudio(_ url: URL, messageId: String) async throws -> String {
         let data = try Data(contentsOf: url)
-        let fileName = "\(messageId).m4a"
-        return try await SupabaseStorageService.shared.uploadFile(
-            data,
-            fileName: fileName,
-            folder: "chat_audio/\(chat.id)",
-            contentType: "audio/mp4"
-        )
+        return try await SupabaseStorageService.shared.uploadVoiceMessage(data, chatId: chat.id, messageId: messageId)
     }
     
     deinit {

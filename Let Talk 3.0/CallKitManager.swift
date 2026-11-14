@@ -141,6 +141,13 @@ extension CallKitManager: CXProviderDelegate {
         }
     }
 
+    /// The mute button on the iPhone's own call screen (lock screen / Dynamic Island).
+    /// It did nothing before; now it mutes the call and live translation like the in-app button.
+    func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {
+        WebRTCCallManager.shared.setMuted(action.isMuted)
+        action.fulfill()
+    }
+
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {}
     func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {}
 }

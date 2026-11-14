@@ -44,6 +44,8 @@ final class LiveTranslationSession: ObservableObject {
     @Published var detectedLanguageName: String?
     @Published var speakAloud = true
     @Published var errorMessage: String?
+    /// True while the call is muted: nothing I say is recognized, translated or sent.
+    @Published private(set) var isMuted = false
 
     private let recognizer = SpeechRecognizer()
     private var consecutiveFailures = 0
@@ -73,6 +75,7 @@ final class LiveTranslationSession: ObservableObject {
         guard !isActive else { return }
         guard AIConsent.shared.requireConsent() else { return }
         isActive = true
+        isMuted = false
         errorMessage = nil
         lastSent = ""
         consecutiveFailures = 0
@@ -82,6 +85,7 @@ final class LiveTranslationSession: ObservableObject {
 
     func stop() {
         isActive = false
+        isMuted = false
         debounceTask?.cancel()
         recognizer.stopRecording()
         synthesizer.stopSpeaking(at: .immediate)
@@ -90,6 +94,25 @@ final class LiveTranslationSession: ObservableObject {
         mySpeech = ""
         subtitle = ""
         lastSent = ""
+    }
+
+    /// Mute / unmute from the call screen (or the iPhone's call UI).
+    /// Muting stops speech recognition and drops anything not yet sent; unmuting starts listening again.
+    func setMuted(_ muted: Bool) {
+        guard muted != isMuted else { return }
+        isMuted = muted
+        guard isActive else { return }
+        if muted {
+            debounceTask?.cancel()
+            debounceTask = nil
+            recognizer.stopRecording()
+            mySpeech = ""
+            lastSent = ""
+        } else {
+            lastSent = ""
+            consecutiveFailures = 0
+            listen()
+        }
     }
 
     /// Picks up a language changed in Settings (only between calls; mid-call use changeMyLanguage).
@@ -112,9 +135,12 @@ final class LiveTranslationSession: ObservableObject {
     // MARK: My speech -> translated -> peer
 
     private func listen() {
+        guard isActive, !isMuted else { return }
         recognizer.startRecording(language: myLanguage.locale) { [weak self] result in
             Task { @MainActor in
                 guard let self, self.isActive else { return }
+                // Muted while the recognizer was still starting: switch the mic off again.
+                if self.isMuted { self.recognizer.stopRecording(); return }
                 switch result {
                 case .success(let text):
                     self.consecutiveFailures = 0
@@ -134,13 +160,14 @@ final class LiveTranslationSession: ObservableObject {
                         }
                     }
                     try? await Task.sleep(nanoseconds: hardFailure ? 2_000_000_000 : 400_000_000)
-                    if self.isActive { self.listen() }
+                    if self.isActive && !self.isMuted { self.listen() }
                 }
             }
         }
     }
 
     private func handlePartial(_ text: String) {
+        guard !isMuted else { return }
         guard Date() >= ignoreSpeechUntil else { return }   // don't translate our own TTS echo
         mySpeech = text
         debounceTask?.cancel()
@@ -152,6 +179,7 @@ final class LiveTranslationSession: ObservableObject {
     }
 
     private func flush() async {
+        guard !isMuted else { return }
         let text = mySpeech.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, text != lastSent else { return }
         // Only send what's new since the last flush so we translate in short chunks (low latency).
@@ -165,6 +193,7 @@ final class LiveTranslationSession: ObservableObject {
         guard !chunk.isEmpty, let target = peerLanguage?.code ?? defaultPeerCode() else { return }
         do {
             let response = try await Backend.translate(text: chunk, source: myLanguage.code, target: target)
+            guard !isMuted, isActive else { return }   // muted while it was being translated
             sendPacket(Packet(type: "subtitle", lang: target, source: myLanguage.code, original: chunk,
                               translated: response.translatedText, voice: myVoiceId))
         } catch {

@@ -13,6 +13,8 @@ struct Message: Identifiable, Codable, Hashable {
     var attachments: [Attachment]?
     var isEncrypted: Bool
     var metadata: [String: String]?
+    /// When the receiver opened it (set on the server by `mark_message_read`). Nil = not read yet.
+    var readAt: Date?
     
     enum MessageType: String, Codable {
         case text

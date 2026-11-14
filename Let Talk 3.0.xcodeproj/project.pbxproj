@@ -17,9 +17,22 @@
 		A1B2C3D4E5F60718293A4C02 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		F2A3F5AA2EF47A6B00FBF7D7 /* Exceptions for "Let Talk 3.0" folder in "Let Talk 3.0" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = F2A3F5082EF47A6B00FBF7D7 /* Let Talk 3.0 */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		F2A3F50B2EF47A6B00FBF7D7 /* Let Talk 3.0 */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F2A3F5AA2EF47A6B00FBF7D7 /* Exceptions for "Let Talk 3.0" folder in "Let Talk 3.0" target */,
+			);
 			path = "Let Talk 3.0";
 			sourceTree = "<group>";
 		};
@@ -64,7 +77,6 @@
 			buildConfigurationList = F2A3F5192EF47A6E00FBF7D7 /* Build configuration list for PBXNativeTarget "Let Talk 3.0" */;
 			buildPhases = (
 				F2A3F5052EF47A6B00FBF7D7 /* Sources */,
-				F2A3F50D2EF47A6B00FBF7D7 /* Exclude Info.plist from Resources */,
 				F2A3F5062EF47A6B00FBF7D7 /* Frameworks */,
 				F2A3F5072EF47A6B00FBF7D7 /* Resources */,
 			);
@@ -131,28 +143,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXShellScriptBuildPhase section */
-		F2A3F50D2EF47A6B00FBF7D7 /* Exclude Info.plist from Resources */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Exclude Info.plist from Resources";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# This script ensures Info.plist is NOT in Copy Bundle Resources\n# Info.plist should only be processed via INFOPLIST_FILE build setting\necho \"Checking Info.plist configuration...\"\n";
-		};
-/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		F2A3F5052EF47A6B00FBF7D7 /* Sources */ = {

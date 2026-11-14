@@ -213,8 +213,16 @@ final class WebRTCCallManager: NSObject, ObservableObject {
     }
 
     func toggleAudio() {
-        isAudioEnabled.toggle()
-        localAudioTrack?.isEnabled = isAudioEnabled
+        setMuted(isAudioEnabled)
+    }
+
+    /// Mute silences me completely: the call's microphone track AND live translation
+    /// (speech recognition stops, so no subtitles or translated voice reach the other person).
+    /// Before, mute only switched off the WebRTC track and translation kept sending what I said.
+    func setMuted(_ muted: Bool) {
+        isAudioEnabled = !muted
+        localAudioTrack?.isEnabled = !muted
+        Task { @MainActor in LiveTranslationSession.shared.setMuted(muted) }
     }
 
     func toggleSpeaker() {

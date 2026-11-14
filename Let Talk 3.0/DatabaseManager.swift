@@ -170,9 +170,12 @@ final class DatabaseManager: ObservableObject {
 
     private func fetchChats(userId: String) async throws -> [Chat] {
         // Assumes `chats.participants` is a Postgres text[] column.
+        // Chats I deleted stay for the other person; they're only hidden from me (hidden_for).
+        let me = userId.lowercased()
         let response = try await client.from("chats")
             .select()
             .contains("participants", value: [userId])
+            .not("hidden_for", operator: .cs, value: "{\(me)}")
             .execute()
 
         let rows = try decoder.decode([ChatRowData].self, from: response.data)
@@ -317,6 +320,7 @@ final class DatabaseManager: ObservableObject {
         let response = try await client.from("calls")
             .select("id, caller_id, callee_id, is_video, status, created_at, answered_at, ended_at")
             .contains("participants", value: [me])
+            .not("hidden_for", operator: .cs, value: "{\(me)}")   // calls I deleted
             .order("created_at", ascending: false)
             .limit(100)
             .execute()
@@ -361,20 +365,18 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    /// Removes a call from MY history only; the other person still sees it.
+    /// (This used to delete the row for both people.)
     func deleteCall(_ callId: String) async throws {
-        _ = try await client.from("calls")
-            .delete()
-            .eq("id", value: callId)
-            .execute()
+        _ = try await client.rpc("hide_call", params: ["p_call_id": callId]).execute()
     }
 
     // MARK: - Chat Management
 
+    /// Removes a chat from MY list only; the other person keeps it. A new message in the chat
+    /// brings it back. (This used to delete the chat for both people.)
     func deleteChat(_ chatId: String) async throws {
-        _ = try await client.from("chats")
-            .delete()
-            .eq("id", value: chatId)
-            .execute()
+        _ = try await client.rpc("hide_chat", params: ["p_chat_id": chatId]).execute()
     }
 
     func pinChat(_ chatId: String) async throws {
@@ -396,12 +398,19 @@ final class DatabaseManager: ObservableObject {
             .execute()
     }
 
+    /// Read receipts. Only the receiver can mark a message read, and only `read_at`/`status`
+    /// change (enforced on the server). The old direct update was always rejected: the
+    /// database only let the SENDER update a message, so nothing was ever marked read.
+    func markMessageRead(_ messageId: String) async throws {
+        _ = try await client.rpc("mark_message_read", params: ["p_message_id": messageId]).execute()
+    }
+
     func markMessagesAsRead(_ messageIds: [String]) async throws {
-        for messageId in messageIds {
-            _ = try await client.from("messages")
-                .update(["status": "read"])
-                .eq("id", value: messageId)
-                .execute()
+        guard !messageIds.isEmpty else { return }
+        if messageIds.count == 1 {
+            try await markMessageRead(messageIds[0])
+        } else {
+            _ = try await client.rpc("mark_messages_read", params: ["p_message_ids": messageIds]).execute()
         }
     }
 
@@ -446,7 +455,8 @@ final class DatabaseManager: ObservableObject {
         
         let updateData = ChatUpdate(
             lastMessage: lastMessage,
-            lastUpdated: ISO8601DateFormatter().string(from: Date())
+            lastUpdated: ISO8601DateFormatter().string(from: Date()),
+            hiddenFor: []   // a new message brings a deleted chat back for both people
         )
 
         _ = try await client.from("chats")
@@ -503,10 +513,12 @@ private struct ChatInsert: Codable {
 private struct ChatUpdate: Codable {
     let lastMessage: ChatLastMessageUpdate?
     let lastUpdated: String
+    let hiddenFor: [String]
     
     enum CodingKeys: String, CodingKey {
         case lastMessage = "last_message"
         case lastUpdated = "last_updated"
+        case hiddenFor = "hidden_for"
     }
 }
 
@@ -561,6 +573,7 @@ private struct MessageRow: Codable {
     let translation: String?
     let attachments: [Message.Attachment]?
     let metadata: [String: String]?
+    let readAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -574,6 +587,7 @@ private struct MessageRow: Codable {
         case translation
         case attachments
         case metadata
+        case readAt = "read_at"
     }
     
     init(from decoder: Decoder) throws {
@@ -587,6 +601,7 @@ private struct MessageRow: Codable {
         status = try container.decode(String.self, forKey: .status)
         isEncrypted = try container.decode(Bool.self, forKey: .isEncrypted)
         translation = try container.decodeIfPresent(String.self, forKey: .translation)
+        readAt = try container.decodeIfPresent(Date.self, forKey: .readAt)
         
         // Decode attachments from JSON string if present
         if let attachmentsString = try? container.decodeIfPresent(String.self, forKey: .attachments),
@@ -614,11 +629,12 @@ private struct MessageRow: Codable {
             type: Message.MessageType(rawValue: type) ?? .text,
             attachments: attachments,
             timestamp: timestamp,
-            status: Message.MessageStatus(rawValue: status) ?? .sent,
+            status: readAt != nil ? .read : (Message.MessageStatus(rawValue: status) ?? .sent),
             isEncrypted: isEncrypted
         )
         m.translation = translation
         m.metadata = metadata
+        m.readAt = readAt
         return m
     }
 }

@@ -95,7 +95,17 @@ struct ChatDetailView: View {
                     ForEach(viewModel.messageGroups.keys.sorted(), id: \.self) { date in
                         Section(header: DateHeader(date: date)) {
                             ForEach(viewModel.messageGroups[date] ?? []) { message in
-                                MessageBubble(message: message, onRetry: { viewModel.retry(message) })
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    MessageBubble(message: message, onRetry: { viewModel.retry(message) })
+                                    // "Read 3:42 PM" under my newest message the other person has opened.
+                                    if message.id == lastReadOutgoingId, let readAt = message.readAt {
+                                        Text("Read \(readAt.formatted(date: .omitted, time: .shortened))")
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                            .padding(.trailing, DS.spacingXS)
+                                            .transition(.opacity)
+                                    }
+                                }
                                 .id(message.id)
                             }
                         }
@@ -120,6 +130,11 @@ struct ChatDetailView: View {
                 scrollToBottom = false
             }
         }
+    }
+    
+    /// My most recent message that the other person has read.
+    private var lastReadOutgoingId: String? {
+        viewModel.messages.last { $0.isOutgoing && $0.readAt != nil }?.id
     }
     
     private var messageInputBar: some View {
@@ -328,16 +343,8 @@ struct MessageBubble: View {
     
     private var imageContent: some View {
         Group {
-            if let url = message.attachments?.first?.url {
-                AsyncImage(url: URL(string: url)) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(maxWidth: 200, maxHeight: 200)
-                        .cornerRadius(8)
-                } placeholder: {
-                    ProgressView()
-                }
+            if let reference = message.attachments?.first?.url {
+                ChatMediaImage(reference: reference)
             } else {
                 EmptyView()
             }
@@ -358,8 +365,8 @@ struct MessageBubble: View {
     
     private var audioContent: some View {
         Group {
-            if let string = message.attachments?.first?.url, let url = URL(string: string) {
-                AudioPlayer(url: url)
+            if let reference = message.attachments?.first?.url {
+                AudioPlayer(reference: reference)
                     .frame(width: 200, height: 50)
             } else {
                 EmptyView()
@@ -370,16 +377,26 @@ struct MessageBubble: View {
     private var fileContent: some View {
         Group {
             if let attachment = message.attachments?.first {
-                HStack {
-                    Image(systemName: "doc")
-                    VStack(alignment: .leading) {
-                        Text(attachment.name)
-                            .lineLimit(1)
-                        Text(formatFileSize(attachment.size))
-                            .font(.caption)
-                            .foregroundColor(.gray)
+                // Tap to open (private files open through a 1-hour signed link).
+                Button {
+                    Task {
+                        if let url = try? await SupabaseStorageService.shared.url(for: attachment.url) {
+                            await UIApplication.shared.open(url)
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: "doc")
+                        VStack(alignment: .leading) {
+                            Text(attachment.name)
+                                .lineLimit(1)
+                            Text(formatFileSize(attachment.size))
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
                     }
                 }
+                .buttonStyle(.plain)
             } else {
                 EmptyView()
             }
@@ -819,12 +836,23 @@ struct VideoThumbnail: View {
 
 /// Plays a voice message (the old view only drew a play icon).
 struct AudioPlayer: View {
-    let url: URL
+    /// Attachment reference (private voice messages are opened through a signed URL).
+    let reference: String
     @StateObject private var playback = VoiceMessagePlayback()
+    @State private var loading = false
     
     var body: some View {
         Button {
-            playback.toggle(url)
+            if playback.isPlaying { playback.stop(); return }
+            guard !loading else { return }
+            loading = true
+            Task {
+                let url = try? await SupabaseStorageService.shared.url(for: reference)
+                await MainActor.run {
+                    loading = false
+                    if let url { playback.toggle(url) }
+                }
+            }
         } label: {
             HStack {
                 Image(systemName: playback.isPlaying ? "pause.circle.fill" : "play.circle.fill")
@@ -867,6 +895,52 @@ final class VoiceMessagePlayback: ObservableObject {
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
         isPlaying = false
+    }
+}
+
+/// A photo from a chat. Private photos are loaded through a 1-hour signed URL.
+struct ChatMediaImage: View {
+    let reference: String
+    @State private var url: URL?
+    @State private var failed = false
+    
+    var body: some View {
+        Group {
+            if let url {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(maxWidth: 200, maxHeight: 200)
+                            .cornerRadius(8)
+                    case .failure:
+                        unavailable
+                    default:
+                        ProgressView().frame(width: 200, height: 150)
+                    }
+                }
+            } else if failed {
+                unavailable
+            } else {
+                ProgressView().frame(width: 200, height: 150)
+            }
+        }
+        .task(id: reference) {
+            do {
+                url = try await SupabaseStorageService.shared.url(for: reference)
+            } catch {
+                failed = true
+            }
+        }
+    }
+    
+    private var unavailable: some View {
+        Label("Photo unavailable", systemImage: "photo")
+            .font(.caption)
+            .foregroundColor(.secondary)
+            .frame(width: 200, height: 80)
     }
 }
 
