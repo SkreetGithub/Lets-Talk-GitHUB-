@@ -381,6 +381,10 @@ struct UnifiedTranslationControlsCard: View {
 struct UnifiedTranslationResultCard: View {
     let translatedText: String
     let isFavorite: Bool
+    /// A translation is on its way: show the shimmer placeholder.
+    var isTranslating: Bool = false
+    /// The translation is being read aloud: show the moving bars.
+    var isSpeaking: Bool = false
     let onCopy: () -> Void
     let onFavorite: () -> Void
     
@@ -391,6 +395,17 @@ struct UnifiedTranslationResultCard: View {
                     .font(.headline)
                     .foregroundColor(.white)
                     .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                
+                if isSpeaking {
+                    HStack(spacing: 6) {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.9))
+                        MiniWaveform()
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    .accessibilityLabel("Playing translation")
+                }
                 
                 Spacer()
                 
@@ -425,7 +440,8 @@ struct UnifiedTranslationResultCard: View {
             
             ScrollView {
                 Text(translatedText.isEmpty ? "Your translation appears here." : translatedText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // Tall enough for the three shimmer lines while a translation is on its way.
+                    .frame(maxWidth: .infinity, minHeight: isTranslating ? 74 : nil, alignment: .topLeading)
                     .padding(16)
                     .background(
                         RoundedRectangle(cornerRadius: 16)
@@ -435,11 +451,20 @@ struct UnifiedTranslationResultCard: View {
                         RoundedRectangle(cornerRadius: 16)
                             .stroke(Color.white.opacity(0.2), lineWidth: 1)
                     )
-                    .foregroundColor(translatedText.isEmpty ? .white.opacity(0.6) : .white)
+                    .foregroundColor(isTranslating ? .clear : (translatedText.isEmpty ? .white.opacity(0.6) : .white))
                     .textSelection(.enabled)
+                    .overlay(alignment: .topLeading) {
+                        if isTranslating {
+                            ShimmerLines()
+                                .padding(16)
+                                .transition(.opacity)
+                        }
+                    }
             }
             .frame(minHeight: 120, maxHeight: 200)
         }
+        .animation(.easeInOut(duration: 0.25), value: isTranslating)
+        .animation(.easeInOut(duration: 0.25), value: isSpeaking)
         .padding(20)
         .background(
             RoundedRectangle(cornerRadius: 20)

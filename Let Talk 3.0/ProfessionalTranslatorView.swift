@@ -65,6 +65,25 @@ struct ProfessionalTranslatorView: View {
                         onClear: viewModel.clearSourceText
                     )
                     
+                    // Live waveform while the microphone is listening
+                    if viewModel.isRecording {
+                        VStack(spacing: DS.spacingS) {
+                            VoiceWaveform(meter: viewModel.levelMeter)
+                            Text("Listening…")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.white.opacity(0.85))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, DS.spacingM)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(.ultraThinMaterial)
+                        )
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Listening")
+                    }
+                    
                     // Translation Controls Card
                     UnifiedTranslationControlsCard(
                         isRecording: viewModel.isRecording,
@@ -89,6 +108,8 @@ struct ProfessionalTranslatorView: View {
                     UnifiedTranslationResultCard(
                         translatedText: viewModel.translatedText,
                         isFavorite: viewModel.isCurrentTranslationFavorite,
+                        isTranslating: viewModel.isTranslating,
+                        isSpeaking: viewModel.isSpeakerOn,
                         onCopy: {
                             UIPasteboard.general.string = viewModel.translatedText
                             Haptics.success()
@@ -97,6 +118,7 @@ struct ProfessionalTranslatorView: View {
                     )
                 }
                 .padding(.horizontal, DS.spacingM)
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: viewModel.isRecording)
                 .padding(.bottom, 140)   // clears the floating tab bar + page dots so the last card can scroll fully into view
             }
             .scrollDismissesKeyboard(.interactively)

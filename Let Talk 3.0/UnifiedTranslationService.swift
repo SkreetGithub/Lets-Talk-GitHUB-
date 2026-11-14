@@ -118,6 +118,9 @@ class UnifiedTranslationViewModel: ObservableObject {
     }
     @Published var isTranslating = false
     @Published var isRecording = false
+    /// Live microphone level while recording (drives the waveform; observed by that view only).
+    let levelMeter = AudioLevelMeter()
+    private var lastLevelPush = Date.distantPast
     @Published var isSpeakerOn = false
     @Published var isProcessingImage = false
     /// Shown to the user as an alert when not empty.
@@ -303,8 +306,9 @@ class UnifiedTranslationViewModel: ObservableObject {
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
         inputNode.removeTap(onBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
             request.append(buffer)
+            self?.pushLevel(from: buffer)
         }
         
         audioEngine.prepare()
@@ -334,9 +338,30 @@ class UnifiedTranslationViewModel: ObservableObject {
         }
     }
     
+    /// Measures how loud the latest chunk of microphone audio is, about 20 times a second.
+    private func pushLevel(from buffer: AVAudioPCMBuffer) {
+        let now = Date()
+        guard now.timeIntervalSince(lastLevelPush) > 0.05,
+              let samples = buffer.floatChannelData?[0] else { return }
+        lastLevelPush = now
+        let count = Int(buffer.frameLength)
+        guard count > 0 else { return }
+        var sum: Float = 0
+        for index in 0..<count {
+            sum += samples[index] * samples[index]
+        }
+        let rms = (sum / Float(count)).squareRoot()
+        let level = Double(min(1, max(0, rms * 14)))
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isRecording else { return }
+            self.levelMeter.level = level
+        }
+    }
+    
     func stopRecording() {
         guard isRecording || recognitionTask != nil else { return }
         isRecording = false
+        levelMeter.level = 0
         if audioEngine.isRunning { audioEngine.stop() }
         audioEngine.inputNode.removeTap(onBus: 0)
         recognitionRequest?.endAudio()
@@ -386,6 +411,7 @@ class UnifiedTranslationViewModel: ObservableObject {
         speakTask = Task { [weak self] in
             do {
                 let duration = try await TranslatedVoicePlayer.shared.speak(String(text.prefix(800)), voiceId: voiceId, language: language.code)
+                await MainActor.run { Haptics.soft() }      // soft pulse as the translated audio starts
                 try await Task.sleep(nanoseconds: UInt64(max(duration, 0.5) * 1_000_000_000))
                 await self?.speakerFinished()
             } catch is CancellationError {
@@ -416,6 +442,7 @@ class UnifiedTranslationViewModel: ObservableObject {
         utterance.voice = AVSpeechSynthesisVoice(language: language.code)
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         synthesizer.speak(utterance)
+        Haptics.soft()
         isSpeakerOn = true
         // Rough length of the utterance, so the button returns to "off" when speech ends.
         let seconds = max(1.5, Double(text.count) / 14)

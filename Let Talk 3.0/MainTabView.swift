@@ -271,6 +271,8 @@ struct TabButton: View {
     let tab: MainTabView.Tab
     @Binding var selectedTab: MainTabView.Tab
     var namespace: Namespace.ID
+    /// Bumped each time this tab becomes the selected one, which bounces its icon.
+    @State private var bounceCount = 0
     
     var body: some View {
         Button(action: { 
@@ -281,6 +283,7 @@ struct TabButton: View {
             VStack(spacing: 4) {
                 Image(systemName: tab.icon)
                     .font(.system(size: 18, weight: .medium))
+                    .symbolEffect(.bounce, value: bounceCount)
                 
                 Text(tab.title)
                     .font(.system(size: 10, weight: .medium))
@@ -305,7 +308,10 @@ struct TabButton: View {
                 }
             )
         }
-        .buttonStyle(PlainButtonStyle())
+        .buttonStyle(PressableStyle())
+        .onChange(of: selectedTab) { _, newTab in
+            if newTab == tab { bounceCount += 1 }
+        }
     }
 }
 

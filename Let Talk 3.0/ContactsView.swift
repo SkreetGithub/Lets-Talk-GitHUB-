@@ -42,7 +42,7 @@ struct ContactsView: View {
         .sheet(item: $selectedContact) { contact in
             ContactDetailsView(contact: contact)
         }
-        .refreshable {
+        .logoRefreshable {
             await viewModel.refreshContacts()
         }
         .alert("Error", isPresented: $viewModel.showError) {
@@ -71,7 +71,7 @@ struct ContactsView: View {
                     ForEach(groupedContacts[key] ?? []) { contact in
                         ContactRow(contact: contact, isOpening: viewModel.openingContactId == contact.id)
                             .contentShape(Rectangle())
-                            .onTapGesture {
+                            .tapGlow {
                                 openChat(with: contact)
                             }
                             // Long-press for call, video, details and delete. (Row swipe actions were

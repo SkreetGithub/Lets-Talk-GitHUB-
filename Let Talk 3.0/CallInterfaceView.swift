@@ -25,7 +25,8 @@ struct CallInterfaceView: View {
     var body: some View {
         ZStack {
             // Background (Settings › Call Interface; "Light" stays dark enough for the white controls)
-            callBackground.ignoresSafeArea()
+            // with slow brand-color glows that swell when the other person speaks.
+            CallAuraBackground(base: callBackground, isLive: callManager.callStatus == .connected)
             
             // Video Views
             videoViews
@@ -77,13 +78,11 @@ struct CallInterfaceView: View {
     
     private var videoViews: some View {
         ZStack {
-            // Remote video (full screen)
-            if callManager.isInCall && (callManager.connectionState == .connected || callManager.connectionState == .completed) {
+            // Remote video (full screen). Voice calls, and video calls that are still connecting,
+            // show the moving background instead of a black screen.
+            if call.isVideo && callManager.isInCall && (callManager.connectionState == .connected || callManager.connectionState == .completed) {
                 RemoteVideoView(remoteVideoView: $remoteVideoView)
                     .ignoresSafeArea()
-            } else {
-                // Placeholder when no video
-                Color.black.ignoresSafeArea()
             }
             
             // Local video (picture-in-picture)
@@ -346,7 +345,6 @@ struct CallInterfaceView: View {
     }
     
     private func declineCall() {
-        Haptics.tap()
         Task {
             await callManager.rejectCall()
             presentationMode.wrappedValue.dismiss()
@@ -354,7 +352,6 @@ struct CallInterfaceView: View {
     }
     
     private func endCall() {
-        Haptics.tap()
         Task {
             await callManager.endCall()
             presentationMode.wrappedValue.dismiss()

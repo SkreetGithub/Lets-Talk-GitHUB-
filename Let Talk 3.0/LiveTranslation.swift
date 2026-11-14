@@ -282,6 +282,11 @@ final class LiveTranslationSession: ObservableObject {
 
 struct SubtitleOverlay: View {
     @ObservedObject var session: LiveTranslationSession
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var subtitleTransition: AnyTransition {
+        reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity)
+    }
 
     var body: some View {
         VStack(spacing: 8) {
@@ -293,14 +298,20 @@ struct SubtitleOverlay: View {
                     .font(.title3.weight(.semibold))
                     .multilineTextAlignment(.center)
                     .foregroundColor(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
                     .lineLimit(4)
-                    .background(Color.black.opacity(0.7))
-                    .cornerRadius(12)
+                    // Frosted-glass pill: readable over video and over the moving background.
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                    )
+                    .environment(\.colorScheme, .dark)
+                    .shadow(color: .black.opacity(0.25), radius: 12, x: 0, y: 6)
                     .padding(.horizontal, 20)
                     .accessibilityLabel("Translated subtitle: \(session.subtitle)")
-                    .transition(.opacity)
+                    .transition(subtitleTransition)
             }
             if !session.mySpeech.isEmpty {
                 Text("You: \(session.mySpeech)")
@@ -311,6 +322,7 @@ struct SubtitleOverlay: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: session.subtitle)
+        .animation(.spring(response: 0.42, dampingFraction: 0.8), value: session.subtitle.isEmpty)
         .allowsHitTesting(false)
     }
 }

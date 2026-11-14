@@ -47,9 +47,9 @@ struct EnhancedAuthView: View {
                 VStack(spacing: DS.spacingL) {
                     Spacer(minLength: DS.spacingXL)
 
-                    // App Logo
+                    // App Logo (smaller during sign-up, so the form is the focus)
                     Image(systemName: "globe.americas.fill")
-                        .font(.system(size: 80))
+                        .font(.system(size: isLoginMode ? 80 : 52))
                         .symbolRenderingMode(.hierarchical)
                         .foregroundColor(.white)
                         .accessibilityHidden(true)
@@ -180,6 +180,20 @@ struct EnhancedAuthView: View {
                 .padding(.horizontal, DS.spacingL)   // one inset for fields, messages and buttons
             }
             .scrollDismissesKeyboard(.interactively)
+            // Sign-up shows where you are: step 1 is this form, step 2 is your phone number.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if !isLoginMode {
+                    SetupProgressBar(step: 1, total: 2, progress: signUpProgress, label: "Your details")
+                        .padding(.horizontal, DS.spacingL)
+                        .padding(.top, DS.spacingS)
+                        .padding(.bottom, DS.spacingS + 2)
+                        .frame(maxWidth: .infinity)
+                        // Frosted strip so the form scrolls cleanly underneath the bar.
+                        .background(.ultraThinMaterial, ignoresSafeAreaEdges: .top)
+                        .environment(\.colorScheme, .dark)
+                        .transition(.opacity)
+                }
+            }
         }
         .sheet(isPresented: $showForgotPassword) {
             ForgotPasswordView()
@@ -193,6 +207,20 @@ struct EnhancedAuthView: View {
         .onChange(of: authManager.needsPhoneVerification) { _, needsPhone in
             showPhoneVerification = needsPhone
         }
+    }
+
+    /// How far through sign-up the user is. This form is the first half; each filled field
+    /// moves the bar along, and the phone-number step is the second half.
+    private var signUpProgress: Double {
+        let filled = [
+            !name.trimmingCharacters(in: .whitespaces).isEmpty,
+            !phone.trimmingCharacters(in: .whitespaces).isEmpty,
+            gender != nil,
+            !email.trimmingCharacters(in: .whitespaces).isEmpty,
+            !password.isEmpty,
+            !confirmPassword.isEmpty
+        ].filter { $0 }.count
+        return 0.08 + 0.42 * Double(filled) / 6.0
     }
 
     /// Male / Female choice for the voice other people hear when this user's speech is

@@ -64,7 +64,7 @@ struct ComprehensiveChatsView: View {
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
-        .refreshable {
+        .logoRefreshable(topInset: 150) {
             await viewModel.refreshChats()
         }
         .onAppear {
@@ -84,7 +84,7 @@ struct ComprehensiveChatsView: View {
             ForEach(filteredChats) { chat in
                 ChatRow(chat: chat, title: viewModel.title(for: chat), photoURL: viewModel.photoURL(for: chat))
                     .contentShape(Rectangle())
-                    .onTapGesture {
+                    .tapGlow {
                         KeyboardDismisser.dismiss()
                         selectedChat = chat
                     }

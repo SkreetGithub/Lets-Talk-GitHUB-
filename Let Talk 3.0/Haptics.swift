@@ -7,5 +7,7 @@ enum Haptics {
     static func success() { guard enabled else { return }; UINotificationFeedbackGenerator().notificationOccurred(.success) }
     static func failure() { guard enabled else { return }; UINotificationFeedbackGenerator().notificationOccurred(.error) }
     static func warning() { guard enabled else { return }; UINotificationFeedbackGenerator().notificationOccurred(.warning) }
+    /// Gentle pulse, e.g. when translated audio starts playing.
+    static func soft()    { guard enabled else { return }; UIImpactFeedbackGenerator(style: .soft).impactOccurred() }
     static func tap()     { guard enabled else { return }; UIImpactFeedbackGenerator(style: .light).impactOccurred() }
 }

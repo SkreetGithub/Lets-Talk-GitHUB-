@@ -293,7 +293,10 @@ struct CallControlButton: View {
     let action: () -> Void
     
     var body: some View {
-        Button(action: action) {
+        Button(action: {
+            Haptics.tap()          // every call control gives a light tap
+            action()
+        }) {
             Image(systemName: icon)
                 .font(.system(size: size * 0.4, weight: .medium))
                 .foregroundColor(color)

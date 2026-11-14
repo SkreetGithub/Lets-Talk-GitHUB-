@@ -257,6 +257,25 @@ final class WebRTCCallManager: NSObject, ObservableObject {
     }
 
     /// Sends a small payload (live-translation subtitles) to the other participant.
+    /// How loud the other person is right now (0...1), read from WebRTC's own statistics.
+    /// Used only to make the call background pulse; calls back on the main queue.
+    func remoteAudioLevel(_ completion: @escaping (Double) -> Void) {
+        guard let pc = peerConnection else {
+            completion(0)
+            return
+        }
+        pc.statistics { report in
+            var level = 0.0
+            for stat in report.statistics.values where stat.type == "inbound-rtp" {
+                if let kind = stat.values["kind"] as? String, kind == "audio",
+                   let value = stat.values["audioLevel"] as? NSNumber {
+                    level = max(level, value.doubleValue)
+                }
+            }
+            DispatchQueue.main.async { completion(level) }
+        }
+    }
+
     func sendData(_ data: Data) {
         guard let channel = dataChannel, channel.readyState == .open else { return }
         channel.sendData(RTCDataBuffer(data: data, isBinary: false))

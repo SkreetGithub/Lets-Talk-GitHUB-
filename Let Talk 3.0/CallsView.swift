@@ -51,7 +51,7 @@ struct CallsView: View {
         .sheet(item: $selectedCall) { call in
             CallDetailsView(call: call)
         }
-        .refreshable {
+        .logoRefreshable {
             await viewModel.refreshCalls()
         }
         .onAppear {
@@ -67,7 +67,7 @@ struct CallsView: View {
                     ForEach(groupedCalls[date] ?? []) { call in
                         CallRow(call: call)
                             .contentShape(Rectangle())
-                            .onTapGesture {
+                            .tapGlow {
                                 selectedCall = call
                             }
                             // Long-press menu instead of row swipes: horizontal swipes switch tabs.

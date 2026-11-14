@@ -12,10 +12,16 @@ struct ChatDetailView: View {
     @State private var showLocationPicker = false
     @State private var showContactPicker = false
     @State private var scrollToBottom = false
+    /// "Is typing" signals for this chat (shows the … bubble).
+    @StateObject private var typing: TypingChannel
+    /// The one-time translation consent has to be shown from this screen: the app-level prompt
+    /// sits behind the full-screen chat, so on a new install messages were never translated.
+    @ObservedObject private var consent = AIConsent.shared
     
     init(chat: Chat) {
         self.chat = chat
         _viewModel = StateObject(wrappedValue: ChatDetailViewModel(chat: chat))
+        _typing = StateObject(wrappedValue: TypingChannel(chatId: chat.id))
     }
     
     var body: some View {
@@ -27,10 +33,15 @@ struct ChatDetailView: View {
         .onAppear {
             KeyboardDismisser.dismiss()   // don't carry a keyboard over from the previous screen
             viewModel.startListening()
+            typing.start()
         }
         .onDisappear {
             viewModel.stopListening()
+            typing.stop()
             if viewModel.isRecording { viewModel.stopRecording() }
+        }
+        .onChange(of: viewModel.messageText) { _, text in
+            typing.userTyped(text)
         }
         .confirmationDialog("Send", isPresented: $showAttachmentPicker) {
             Button("Photo") { showImagePicker = true }
@@ -75,6 +86,9 @@ struct ChatDetailView: View {
         .sheet(isPresented: $showContactPicker) {
             ContactPicker(selectedContact: $viewModel.selectedContact)
         }
+        .sheet(isPresented: $consent.needsPrompt) {
+            AIConsentView()
+        }
     }
     
     // MARK: - Computed Properties
@@ -103,16 +117,24 @@ struct ChatDetailView: View {
                                             .font(.caption2)
                                             .foregroundColor(.secondary)
                                             .padding(.trailing, DS.spacingXS)
-                                            .transition(.opacity)
+                                            .transition(.opacity.combined(with: .offset(y: -4)))
                                     }
                                 }
                                 .id(message.id)
                             }
                         }
                     }
+                    
+                    if typing.isOtherTyping {
+                        TypingBubble()
+                            .id("typing-indicator")
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                    }
                 }
                 .padding(.horizontal, DS.spacingM)
                 .padding(.vertical, DS.spacingS)
+                .animation(.easeOut(duration: 0.4), value: lastReadOutgoingId)        // "Read" fades in
+                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: typing.isOtherTyping)
             }
             .defaultScrollAnchor(.bottom)                 // open on the newest message, not the oldest
             .scrollDismissesKeyboard(.interactively)
@@ -128,6 +150,13 @@ struct ChatDetailView: View {
                     proxy.scrollTo(lastId, anchor: .bottom)
                 }
                 scrollToBottom = false
+                typing.messageArrived()
+            }
+            .onChange(of: typing.isOtherTyping) { _, isTyping in
+                guard isTyping else { return }
+                withAnimation(.easeOut(duration: 0.25)) {
+                    proxy.scrollTo("typing-indicator", anchor: .bottom)
+                }
             }
         }
     }
@@ -174,8 +203,13 @@ struct ChatHeader: View {
                 .frame(width: 40, height: 40)
             
             VStack(alignment: .leading, spacing: 2) {
+                // One line, shrinking a little before it truncates (long names used to wrap
+                // onto three lines and push the header down).
                 Text(contact.name)
                     .font(.headline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .truncationMode(.tail)
                 
                 if contact.isOnline {
                     Text("Online")
@@ -185,11 +219,15 @@ struct ChatHeader: View {
                     Text("Last seen \(timeAgo(from: lastSeen))")
                         .font(.caption)
                         .foregroundColor(.gray)
+                        .lineLimit(1)
                 }
             }
+            .layoutPriority(1)
             
-            Spacer()
+            Spacer(minLength: 0)
             
+            // The three actions sit flush (each keeps its 44-pt tap area) so the name has room.
+            HStack(spacing: 0) {
             Button(action: onAudioCall) {
                 Image(systemName: "phone")
                     .font(.system(size: 20))
@@ -207,6 +245,7 @@ struct ChatHeader: View {
             UserSafetyMenu(userId: contact.id, userName: contact.name)
                 .font(.system(size: 20))
                 .frame(width: DS.minTapTarget, height: DS.minTapTarget)
+            }
         }
         .padding(.horizontal, DS.spacingS)
         .padding(.vertical, DS.spacingXS)
@@ -229,6 +268,17 @@ struct MessageBubble: View {
     @ObservedObject private var settingsManager = SettingsManager.shared
     private var bubbleStyle: AppSettings.ChatBubbleSettings { settingsManager.settings.chatBubbles }
     @State private var showOriginal = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Turns true once a brand-new bubble has played its entrance.
+    @State private var hasEntered = false
+    /// Tilt of the bubble while it flips between the translation and the original.
+    @State private var flipAngle: Double = 0
+    
+    /// Only messages that just arrived animate in; history appears in place.
+    private var isFresh: Bool {
+        Date().timeIntervalSince(message.timestamp) < (message.isOutgoing ? 3 : 12)
+    }
+    private var entered: Bool { hasEntered || !isFresh }
     
     var body: some View {
         if message.type == .system {
@@ -284,15 +334,48 @@ struct MessageBubble: View {
             .padding(.vertical, DS.spacingS)
             .background(bubbleBackground)
             .clipShape(RoundedRectangle(cornerRadius: CGFloat(bubbleStyle.cornerRadius), style: .continuous))
+            .rotation3DEffect(.degrees(flipAngle), axis: (x: 1, y: 0, z: 0), perspective: 0.5)
             .contextMenu {
                 messageContextMenu
             }
+            // Sent bubbles spring up from the corner; received bubbles slide in from the left.
+            .scaleEffect(!entered && message.isOutgoing && !reduceMotion ? 0.5 : 1,
+                         anchor: message.isOutgoing ? .bottomTrailing : .bottomLeading)
+            .offset(x: !entered && !message.isOutgoing && !reduceMotion ? -70 : 0)
+            .opacity(entered ? 1 : 0)
             
             if !message.isOutgoing {
                 Spacer(minLength: 48)
             }
         }
         .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+        .onAppear {
+            guard !hasEntered else { return }
+            guard isFresh else {
+                hasEntered = true
+                return
+            }
+            let entrance: Animation = reduceMotion
+                ? .easeOut(duration: 0.2)
+                : (message.isOutgoing
+                    ? .spring(response: 0.38, dampingFraction: 0.6)
+                    : .spring(response: 0.45, dampingFraction: 0.82))
+            withAnimation(entrance) { hasEntered = true }
+        }
+    }
+    
+    /// Flips the bubble over to swap between the translation and what the sender typed.
+    private func flipOriginal() {
+        guard !reduceMotion else {
+            withAnimation(.easeInOut(duration: 0.15)) { showOriginal.toggle() }
+            return
+        }
+        Haptics.tap()
+        withAnimation(.easeIn(duration: 0.16)) { flipAngle = 90 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+            showOriginal.toggle()
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.7)) { flipAngle = 0 }
+        }
     }
     
     private var statusText: String {
@@ -317,7 +400,7 @@ struct MessageBubble: View {
 
             if translated != nil {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { showOriginal.toggle() }
+                    flipOriginal()
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "translate")
