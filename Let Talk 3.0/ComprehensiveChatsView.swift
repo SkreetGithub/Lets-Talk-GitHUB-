@@ -148,9 +148,9 @@ struct ChatRow: View {
             // Profile Image
             ProfileImageView(
                 imageURL: photoURL ?? chat.imageURL,
-                placeholderText: title.prefix(1).uppercased()
+                placeholderText: Initials.from(title),
+                size: 44
             )
-            .frame(width: 50, height: 50)
             .overlay(
                 // Unread indicator
                 Circle()

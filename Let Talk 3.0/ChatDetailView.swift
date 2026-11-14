@@ -34,10 +34,12 @@ struct ChatDetailView: View {
             KeyboardDismisser.dismiss()   // don't carry a keyboard over from the previous screen
             viewModel.startListening()
             typing.start()
+            NotificationManager.shared.openChatId = chat.id     // no banners for the chat on screen
         }
         .onDisappear {
             viewModel.stopListening()
             typing.stop()
+            if NotificationManager.shared.openChatId == chat.id { NotificationManager.shared.openChatId = nil }
             if viewModel.isRecording { viewModel.stopRecording() }
         }
         .onChange(of: viewModel.messageText) { _, text in
@@ -198,9 +200,8 @@ struct ChatHeader: View {
             }
             .accessibilityLabel("Back")
             
-            ProfileImageView(imageURL: contact.imageURL,
-                           placeholderText: contact.initials)
-                .frame(width: 40, height: 40)
+            UserAvatar(userId: contact.userId ?? contact.id, name: contact.name,
+                       fallbackURL: contact.imageURL, size: 32)
             
             VStack(alignment: .leading, spacing: 2) {
                 // One line, shrinking a little before it truncates (long names used to wrap

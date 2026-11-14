@@ -156,8 +156,8 @@ struct UnifiedSettingsView: View {
                 HStack {
                     ProfileImageView(
                         imageURL: authManager.currentUser?.photoURL,
-                        placeholderText: String(authManager.currentUser?.name.prefix(1) ?? "U"),
-                        size: 60
+                        placeholderText: Initials.from(authManager.currentUser?.name ?? ""),
+                        size: 44
                     )
                     
                     VStack(alignment: .leading, spacing: 4) {
@@ -340,11 +340,13 @@ struct UnifiedSettingsView: View {
                     Image(systemName: "globe")
                         .foregroundColor(.blue)
                         .frame(width: 24)
-                    Text("Translation Provider")
+                    Text("Translation Quality")
                 }
             }
         } header: {
             Text("Language & Translation")
+        } footer: {
+            Text("Standard is fast and works for everyday conversation. Advanced takes a moment longer and handles slang and context better.")
         }
     }
     

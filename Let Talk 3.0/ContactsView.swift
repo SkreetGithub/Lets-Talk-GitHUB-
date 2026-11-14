@@ -151,9 +151,8 @@ struct ContactRow: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            ProfileImageView(imageURL: nil,
-                           placeholderText: contact.initials)
-                .frame(width: 40, height: 40)
+            UserAvatar(userId: contact.userId, name: contact.name,
+                       fallbackURL: contact.imageURL, size: 44)
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(contact.name)
@@ -423,8 +422,8 @@ struct ContactDetailsView: View {
             VStack(spacing: 30) {
                 // Profile Section
                 VStack(spacing: 16) {
-                    ProfileImageView(imageURL: contact.imageURL, placeholderText: contact.initials)
-                        .frame(width: 120, height: 120)
+                    UserAvatar(userId: contact.userId, name: contact.name,
+                               fallbackURL: contact.imageURL, size: 120)
                     
                     Text(contact.name)
                         .font(.title2)

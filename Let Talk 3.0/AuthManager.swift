@@ -263,6 +263,30 @@ final class AuthManager: ObservableObject {
         await fetchUserProfile(userId: userId)
     }
 
+    /// Uploads a new profile photo to the private bucket and saves it on the profile.
+    func setProfilePhoto(_ image: UIImage) async throws {
+        guard let userId = currentUserId else { throw BackendError.notSignedIn }
+        let reference = try await SupabaseStorageService.shared.uploadProfilePhoto(image, userId: userId)
+        _ = try await client.from("profiles")
+            .update(ProfileUpdate(photoURL: reference))
+            .eq("id", value: userId)
+            .execute()
+        await MainActor.run { AvatarDirectory.shared.set(reference, for: userId) }
+        await fetchUserProfile(userId: userId)
+    }
+
+    /// Removes the profile photo (the initials show instead).
+    func removeProfilePhoto() async throws {
+        guard let userId = currentUserId else { throw BackendError.notSignedIn }
+        _ = try await client.from("profiles")
+            .update(PhotoClear())
+            .eq("id", value: userId)
+            .execute()
+        await SupabaseStorageService.shared.removeProfilePhotos(userId: userId)
+        await MainActor.run { AvatarDirectory.shared.set(nil, for: userId) }
+        await fetchUserProfile(userId: userId)
+    }
+
     func savePhoneNumber(_ phoneNumber: SavedPhoneNumber) async throws {
         guard let userId = currentUserId else { return }
 
@@ -582,6 +606,15 @@ struct User: Identifiable, Codable {
 }
 
 // MARK: - Supabase Row + JSON Helpers
+
+/// Sets profiles.photo_url to null (ProfileUpdate leaves out fields that are nil).
+private struct PhotoClear: Encodable {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeNil(forKey: .photoURL)
+    }
+    enum CodingKeys: String, CodingKey { case photoURL = "photo_url" }
+}
 
 private struct ProfileUpdate: Codable {
     var name: String?

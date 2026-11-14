@@ -43,6 +43,8 @@ final class RemoteAudioMeter: ObservableObject {
 struct CallAuraBackground: View {
     var base: Color
     var isLive: Bool
+    /// How strong the glows are: 1 on the call screen, lower behind content like the dial pad.
+    var intensity: Double = 1
     @StateObject private var meter = RemoteAudioMeter()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -89,7 +91,7 @@ struct CallAuraBackground: View {
             }
         }
         .blur(radius: 70)
-        .opacity(0.7)
+        .opacity(0.7 * intensity)
     }
 
     private func glow(_ color: Color, size: CGFloat, x: CGFloat, y: CGFloat) -> some View {

@@ -322,47 +322,60 @@ struct SecondaryButtonStyle: ButtonStyle {
 }
 
 // MARK: - Profile Image View
+/// A round avatar. Shows the person's photo (cached on the phone after the first download)
+/// or, while it loads or if there is none, their initials in white on brand blue.
+/// `imageURL` can be a web address or a private photo reference ("lettalk-media://…").
 struct ProfileImageView: View {
     let imageURL: String?
     let placeholderText: String
     let size: CGFloat
+    @State private var image: UIImage?
     
     init(imageURL: String?, placeholderText: String, size: CGFloat = 50) {
         self.imageURL = imageURL
         self.placeholderText = placeholderText
         self.size = size
+        if let imageURL, !imageURL.isEmpty {
+            _image = State(initialValue: AvatarImageCache.shared.cachedInMemory(imageURL))
+        }
     }
     
     var body: some View {
-        Group {
-            if let imageURL = imageURL, !imageURL.isEmpty {
-                AsyncImage(url: URL(string: imageURL)) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    placeholderView
-                }
-            } else {
-                placeholderView
+        ZStack {
+            placeholderView
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .transition(.opacity)
             }
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
+        .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 0.5))
+        .animation(.easeOut(duration: 0.25), value: image != nil)
+        .task(id: imageURL) {
+            guard let imageURL, !imageURL.isEmpty else {
+                image = nil
+                return
+            }
+            if let cached = AvatarImageCache.shared.cachedInMemory(imageURL) {
+                image = cached
+                return
+            }
+            image = nil
+            image = await AvatarImageCache.shared.image(for: imageURL)
+        }
+        .accessibilityHidden(true)
     }
     
     private var placeholderView: some View {
-        Text(placeholderText)
-            .font(.system(size: size * 0.4, weight: .medium))
+        Text(placeholderText.isEmpty ? "?" : String(placeholderText.prefix(2)))
+            .font(.system(size: size * 0.38, weight: .semibold, design: .rounded))
             .foregroundColor(.white)
+            .minimumScaleFactor(0.5)
             .frame(width: size, height: size)
-            .background(
-                LinearGradient(
-                    gradient: Gradient(colors: [.blue, .purple]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+            .background(Brand.blue)
     }
 }
 

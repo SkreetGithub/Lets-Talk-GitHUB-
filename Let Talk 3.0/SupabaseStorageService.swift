@@ -34,6 +34,45 @@ final class SupabaseStorageService: ObservableObject {
         return path
     }
 
+    // MARK: - Profile photo (private)
+    //
+    // profile-photos/<user id>/<time>.jpg. Every upload gets a new name, so phones that cached
+    // the old photo pick up the new one. Older photos in the folder are removed afterwards.
+
+    static let profilePhotosBucket = "profile-photos"
+
+    /// Uploads a square avatar and returns the reference to store in profiles.photo_url.
+    func uploadProfilePhoto(_ image: UIImage, userId: String) async throws -> String {
+        let square = image.squareAvatar(side: 512)
+        guard let data = square.jpegData(compressionQuality: 0.85) else {
+            throw NSError(domain: "SupabaseStorageService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Couldn't read that photo. Please try another one."])
+        }
+        let folder = userId.lowercased()
+        let path = "\(folder)/\(Int(Date().timeIntervalSince1970)).jpg"
+        _ = try await client.storage
+            .from(Self.profilePhotosBucket)
+            .upload(path, data: data, options: FileOptions(contentType: "image/jpeg", upsert: false))
+        let reference = Self.mediaScheme + Self.profilePhotosBucket + "/" + path
+        await AvatarImageCache.shared.store(square, data: data, for: reference)
+        await removeProfilePhotos(userId: userId, keeping: path)
+        return reference
+    }
+
+    /// Deletes this user's stored photos (all of them, or all but `keeping`).
+    func removeProfilePhotos(userId: String, keeping: String? = nil) async {
+        let folder = userId.lowercased()
+        guard let files = try? await client.storage.from(Self.profilePhotosBucket).list(path: folder) else { return }
+        var old: [String] = []
+        for file in files {
+            let name: String? = file.name
+            guard let name, !name.isEmpty else { continue }
+            let path = "\(folder)/\(name)"
+            if path != keeping { old.append(path) }
+        }
+        guard !old.isEmpty else { return }
+        _ = try? await client.storage.from(Self.profilePhotosBucket).remove(paths: old)
+    }
+
     // MARK: - Chat Media (private)
     //
     // Photos and files go to the private `chat-files` bucket, voice messages to `chat-audio`,

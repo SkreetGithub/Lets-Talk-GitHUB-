@@ -9,7 +9,10 @@ typealias ActivityID = String
 class NotificationManager: NSObject, ObservableObject {
     static let shared = NotificationManager()
     
-    @Published var currentMessage: (String, String, String?)? // (message, sender, profileImage)
+    /// The in-app banner for a message that arrived while the app is open.
+    @Published var currentMessage: InAppMessage?
+    /// The chat on screen right now (set by the chat screen), so its own messages don't banner.
+    var openChatId: String?
     @Published var currentCall: CallAttributes.ContentState?
     @Published var showMessageNotification = false
     @Published var showCallNotification = false
@@ -63,15 +66,25 @@ class NotificationManager: NSObject, ObservableObject {
         }
     }
     
-    func showMessageNotification(message: String, senderName: String, profileImage: String? = nil) {
-        currentMessage = (message, senderName, profileImage)
-        showMessageNotification = true
-        
-        // Hide notification after delay
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
-            self.showMessageNotification = false
+    func showMessageNotification(message: String, senderName: String, profileImage: String? = nil,
+                                 senderId: String? = nil, chatId: String? = nil, messageId: String? = nil) {
+        let banner = InAppMessage(id: messageId ?? UUID().uuidString, text: message, senderName: senderName,
+                                  senderId: senderId, photo: profileImage, chatId: chatId)
+        DispatchQueue.main.async {
+            self.currentMessage = banner
+            self.showMessageNotification = true
+            // Hide it after 4 seconds (it used to stay on screen for good).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                guard self.currentMessage?.id == banner.id else { return }
+                self.currentMessage = nil
+                self.showMessageNotification = false
+            }
         }
+    }
+    
+    func dismissMessageBanner() {
+        currentMessage = nil
+        showMessageNotification = false
     }
     
     func showCallNotification(caller: String, isVideo: Bool, callerId: String, callerImage: String?) {
@@ -303,6 +316,27 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
     ) {
         let userInfo = notification.request.content.userInfo
         
+        // Message pushes from the `send-message-push` function: { aps, type: "message", chat_id,
+        // sender_id, message_id }. While the app is open, show Let Talk's own banner (with the
+        // sender's photo) instead of the system one, and nothing at all for the chat on screen.
+        if (userInfo["type"] as? String) == "message" {
+            let chatId = userInfo["chat_id"] as? String
+            if let chatId, chatId == openChatId {
+                completionHandler([])
+                return
+            }
+            let alert = (userInfo["aps"] as? [String: Any])?["alert"] as? [String: Any]
+            showMessageNotification(
+                message: alert?["body"] as? String ?? notification.request.content.body,
+                senderName: alert?["title"] as? String ?? notification.request.content.title,
+                senderId: userInfo["sender_id"] as? String,
+                chatId: chatId,
+                messageId: userInfo["message_id"] as? String
+            )
+            completionHandler([.list, .sound])
+            return
+        }
+        
         if let messageData = userInfo["message"] as? [String: Any],
            let content = messageData["content"] as? String,
            let sender = messageData["sender"] as? String {
@@ -357,6 +391,18 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         
         completionHandler()
     }
+}
+
+// MARK: - In-app message banner
+
+struct InAppMessage: Equatable {
+    let id: String
+    let text: String
+    let senderName: String
+    /// Used to look up the sender's profile photo.
+    let senderId: String?
+    let photo: String?
+    let chatId: String?
 }
 
 // MARK: - Notification Names
@@ -418,9 +464,9 @@ struct NotificationOverlay: ViewModifier {
             if notificationManager.showMessageNotification,
                let message = notificationManager.currentMessage {
                 MessageNotificationView(
-                    message: message.0,
-                    senderName: message.1,
-                    profileImage: message.2
+                    message: message.text,
+                    senderName: message.senderName,
+                    profileImage: message.photo
                 )
                 .transition(.move(edge: .top))
                 .zIndex(1)
@@ -451,9 +497,9 @@ struct MessageNotificationView: View {
         HStack(spacing: 12) {
             ProfileImageView(
                 imageURL: profileImage,
-                placeholderText: String(senderName.prefix(2))
+                placeholderText: Initials.from(senderName),
+                size: 40
             )
-            .frame(width: 40, height: 40)
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(senderName)
@@ -480,9 +526,9 @@ struct CallNotificationView: View {
         HStack(spacing: 12) {
             ProfileImageView(
                 imageURL: callerImage,
-                placeholderText: String(callerName.prefix(2))
+                placeholderText: Initials.from(callerName),
+                size: 40
             )
-            .frame(width: 40, height: 40)
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(callerName)

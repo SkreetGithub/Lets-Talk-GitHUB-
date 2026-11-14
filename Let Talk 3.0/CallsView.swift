@@ -126,9 +126,8 @@ struct CallRow: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            ProfileImageView(imageURL: call.contact.imageURL,
-                           placeholderText: call.contact.initials)
-                .frame(width: 40, height: 40)
+            UserAvatar(userId: call.contact.userId ?? call.contact.id, name: call.contact.name,
+                       fallbackURL: call.contact.imageURL, size: 44)
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(call.contact.name)
@@ -356,8 +355,8 @@ struct CallDetailsView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 20) {
-                ProfileImageView(imageURL: call.contact.imageURL, placeholderText: call.contact.initials)
-                    .frame(width: 100, height: 100)
+                UserAvatar(userId: call.contact.userId ?? call.contact.id, name: call.contact.name,
+                           fallbackURL: call.contact.imageURL, size: 100)
                 
                 Text(call.contact.name)
                     .font(.title)

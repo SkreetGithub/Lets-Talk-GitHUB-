@@ -466,11 +466,13 @@ enum TranslationProvider: String, CaseIterable, Codable {
     /// Value for the `translate` function's `provider` field (nil = Google, the default).
     var backendValue: String? { self == .openAI ? "openai" : nil }
 
+    /// What users see. The vendor behind each option isn't shown in the app (the privacy policy
+    /// names the providers). Standard = Google Translate, Advanced = OpenAI.
     var displayName: String {
         switch self {
-        case .google: return "Google Translate"
-        case .openAI: return "OpenAI GPT"
-        case .azure: return "Azure Translator"
+        case .google: return "Standard"
+        case .openAI: return "Advanced"
+        case .azure: return "Enterprise"
         }
     }
 }

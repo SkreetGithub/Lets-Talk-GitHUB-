@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 struct MainTabView: View {
     @EnvironmentObject var authManager: AuthManager
@@ -677,6 +678,12 @@ struct ProfileEditorView: View {
     @State private var showAlert = false
     @State private var alertMessage = ""
     @State private var showVoiceSettings = false
+    // Profile photo
+    @State private var showPhotoOptions = false
+    @State private var pickerSource: UIImagePickerController.SourceType?
+    @State private var isUploadingPhoto = false
+    @State private var photoError: String?
+    @State private var showCameraDenied = false
     
     /// e.g. "Male · Voice 3", or "Not set".
     private var voiceSummary: String {
@@ -689,6 +696,11 @@ struct ProfileEditorView: View {
     var body: some View {
         NavigationView {
             Form {
+                Section {
+                    photoHeader
+                }
+                .listRowBackground(Color.clear)
+                
                 Section {
                     HStack {
                         Image(systemName: "person.fill")
@@ -739,6 +751,36 @@ struct ProfileEditorView: View {
             .sheet(isPresented: $showVoiceSettings) {
                 VoiceSettingsView()
             }
+            .confirmationDialog("Profile Photo", isPresented: $showPhotoOptions, titleVisibility: .visible) {
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    Button("Take Photo") { openCamera() }
+                }
+                Button("Choose from Library") { pickerSource = .photoLibrary }
+                if authManager.currentUser?.photoURL?.isEmpty == false {
+                    Button("Remove Photo", role: .destructive) { removePhoto() }
+                }
+                Button("Cancel", role: .cancel) { }
+            }
+            .fullScreenCover(item: $pickerSource) { source in
+                SystemImagePicker(source: source) { image in uploadPhoto(image) }
+                    .ignoresSafeArea()
+            }
+            .alert("Photo Not Saved", isPresented: Binding(
+                get: { photoError != nil },
+                set: { if !$0 { photoError = nil } }
+            )) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(photoError ?? "")
+            }
+            .alert("Camera Access Needed", isPresented: $showCameraDenied) {
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Turn on Camera for Let Talk in Settings to take a profile photo.")
+            }
             .navigationTitle("Edit Profile")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarItems(
@@ -756,6 +798,95 @@ struct ProfileEditorView: View {
             Button("OK") { }
         } message: {
             Text(alertMessage)
+        }
+    }
+    
+    /// Tappable 100-pt avatar at the top of Edit Profile.
+    private var photoHeader: some View {
+        VStack(spacing: DS.spacingS) {
+            Button {
+                KeyboardDismisser.dismiss()
+                showPhotoOptions = true
+            } label: {
+                ZStack(alignment: .bottomTrailing) {
+                    ProfileImageView(imageURL: authManager.currentUser?.photoURL,
+                                     placeholderText: Initials.from(name.isEmpty ? (authManager.currentUser?.name ?? "") : name),
+                                     size: 100)
+                        .overlay {
+                            if isUploadingPhoto {
+                                Circle().fill(Color.black.opacity(0.45))
+                                ProgressView().tint(.white).controlSize(.large)
+                            }
+                        }
+                        .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
+                    Image(systemName: "camera.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 32, height: 32)
+                        .background(Circle().fill(Color.blue))
+                        .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 3))
+                        .offset(x: 2, y: 2)
+                }
+            }
+            .buttonStyle(PressableStyle())
+            .disabled(isUploadingPhoto)
+            .accessibilityLabel("Profile photo")
+            .accessibilityHint("Change or remove your photo")
+            
+            Text(isUploadingPhoto ? "Uploading…" : (authManager.currentUser?.photoURL?.isEmpty == false ? "Change Photo" : "Add Photo"))
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.blue)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, DS.spacingS)
+    }
+    
+    private func openCamera() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            pickerSource = .camera
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    if granted { pickerSource = .camera } else { showCameraDenied = true }
+                }
+            }
+        default:
+            showCameraDenied = true
+        }
+    }
+    
+    private func uploadPhoto(_ image: UIImage) {
+        isUploadingPhoto = true
+        Task {
+            do {
+                try await authManager.setProfilePhoto(image)
+                await MainActor.run {
+                    isUploadingPhoto = false
+                    Haptics.success()
+                }
+            } catch {
+                await MainActor.run {
+                    isUploadingPhoto = false
+                    photoError = "Your photo couldn't be uploaded. Check your connection and try again."
+                    Haptics.failure()
+                }
+            }
+        }
+    }
+    
+    private func removePhoto() {
+        isUploadingPhoto = true
+        Task {
+            do {
+                try await authManager.removeProfilePhoto()
+                await MainActor.run { isUploadingPhoto = false }
+            } catch {
+                await MainActor.run {
+                    isUploadingPhoto = false
+                    photoError = "Your photo couldn't be removed. Check your connection and try again."
+                }
+            }
         }
     }
     
@@ -912,4 +1043,10 @@ struct ThemeSettingsView: View {
             .navigationBarItems(trailing: Button("Done") { dismiss() })
         }
     }
+}
+
+
+/// Lets the photo picker be shown with `.fullScreenCover(item:)`.
+extension UIImagePickerController.SourceType: @retroactive Identifiable {
+    public var id: Int { rawValue }
 }

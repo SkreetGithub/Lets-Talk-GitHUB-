@@ -75,7 +75,7 @@ struct AITranslationConsentToggle: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("AI Translation")
                 Text(consent.hasConsented
-                     ? "Text is sent to Google Translate / OpenAI to translate it."
+                     ? "Text is sent to third-party translation services to translate it."
                      : "Translation is paused. Turn on to translate calls and messages.")
                     .font(.caption)
                     .foregroundColor(.secondary)

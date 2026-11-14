@@ -15,6 +15,7 @@ struct CallInterfaceView: View {
     @State private var callTimer: Timer?
     @StateObject private var liveTranslation = LiveTranslationSession.shared
     @State private var otherPartyName: String?
+    @State private var otherPartyPhoto: String?
     // The consent prompt must be shown from the call screen: it sits in its own window above the
     // app, so the app-level consent sheet opened invisibly behind it and translation never started.
     @ObservedObject private var consent = AIConsent.shared
@@ -51,8 +52,11 @@ struct CallInterfaceView: View {
             liveTranslation.stop()
         }
         .task {
-            // Show the other person's name, not their raw user ID.
-            otherPartyName = try? await DatabaseManager.shared.getUser(id: otherPartyId).name
+            // Show the other person's name and photo, not their raw user ID.
+            if let user = try? await DatabaseManager.shared.getUser(id: otherPartyId) {
+                otherPartyName = user.name
+                otherPartyPhoto = user.photoURL
+            }
         }
         .onTapGesture {
             toggleControls()
@@ -231,9 +235,35 @@ struct CallInterfaceView: View {
     
     // MARK: - Status Overlay
     
+    /// Ringing / connecting: the avatar pulses with a soft glow.
+    private var isRinging: Bool {
+        switch callManager.callStatus {
+        case .incoming, .initiating, .answering, .connecting: return true
+        default: return false
+        }
+    }
+    
+    /// The remote video fills the screen once a video call connects; otherwise show the avatar.
+    private var showsRemoteVideo: Bool {
+        call.isVideo && callManager.isInCall
+            && (callManager.connectionState == .connected || callManager.connectionState == .completed)
+    }
+    
     private var statusOverlay: some View {
-        VStack {
+        VStack(spacing: DS.spacingL) {
             Spacer()
+            if !showsRemoteVideo {
+                ZStack {
+                    RingingGlow(active: isRinging)
+                        .frame(width: 120, height: 120)
+                    ProfileImageView(imageURL: otherPartyPhoto,
+                                     placeholderText: Initials.from(otherPartyName ?? ""),
+                                     size: 120)
+                        .overlay(Circle().stroke(Color.white.opacity(0.35), lineWidth: 2))
+                        .shadow(color: .black.opacity(0.3), radius: 16, y: 8)
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
             if callManager.callStatus != .connected && callManager.callStatus != .idle {
                 HStack(spacing: DS.spacingS) {
                     if callManager.callStatus != .failed && callManager.callStatus != .disconnected {
@@ -254,6 +284,7 @@ struct CallInterfaceView: View {
         }
         .allowsHitTesting(false)
         .animation(.easeInOut(duration: 0.25), value: callManager.callStatus)
+        .animation(.easeInOut(duration: 0.35), value: showsRemoteVideo)
     }
     
     // MARK: - Connection Status Indicator
