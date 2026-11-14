@@ -182,6 +182,16 @@ final class DatabaseManager: ObservableObject {
         return rows.map { $0.asChat }
     }
 
+    /// One chat by ID (only returned if I'm in it), e.g. to open it from a notification.
+    func fetchChat(id: String) async throws -> Chat? {
+        let response = try await client.from("chats")
+            .select()
+            .eq("id", value: id)
+            .limit(1)
+            .execute()
+        return try decoder.decode([ChatRowData].self, from: response.data).first?.asChat
+    }
+
     // MARK: - Users
 
     func getUser(id: String) async throws -> User {

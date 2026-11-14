@@ -82,6 +82,10 @@ struct MainTabView: View {
                 // Swiped to a new page: highlight its tab.
                 if let page, page != selectedTab { selectedTab = page }
             }
+            // A tapped notification opens its chat: bring the Chats tab forward first.
+            .onReceive(NotificationManager.shared.$pendingChatId) { chatId in
+                if chatId != nil, selectedTab != .chats { selectedTab = .chats }
+            }
             .onChange(of: selectedTab) { _, newTab in
                 // Tapped a tab: slide the pager there.
                 if pagerPosition != newTab {

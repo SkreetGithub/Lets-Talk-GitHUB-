@@ -13,7 +13,11 @@ struct DynamicIslandViews: View {
                     senderId: message.senderId,
                     profileImage: message.photo
                 )
-                .onTapGesture { notificationManager.dismissMessageBanner() }
+                .onTapGesture {
+                    // Tapping the banner opens that conversation.
+                    if let chatId = message.chatId { notificationManager.pendingChatId = chatId }
+                    notificationManager.dismissMessageBanner()
+                }
                 .frame(maxHeight: .infinity, alignment: .top)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }

@@ -13,6 +13,8 @@ class NotificationManager: NSObject, ObservableObject {
     @Published var currentMessage: InAppMessage?
     /// The chat on screen right now (set by the chat screen), so its own messages don't banner.
     var openChatId: String?
+    /// A chat to open because the user tapped its notification (the Chats tab opens it).
+    @Published var pendingChatId: String?
     @Published var currentCall: CallAttributes.ContentState?
     @Published var showMessageNotification = false
     @Published var showCallNotification = false
@@ -366,6 +368,13 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let userInfo = response.notification.request.content.userInfo
+        
+        // Tapped a message push (from `send-message-push`): open that chat.
+        if (userInfo["type"] as? String) == "message", let chatId = userInfo["chat_id"] as? String {
+            DispatchQueue.main.async { self.pendingChatId = chatId }
+            completionHandler()
+            return
+        }
         
         if let messageData = userInfo["message"] as? [String: Any],
            let chatId = messageData["chatId"] as? String {

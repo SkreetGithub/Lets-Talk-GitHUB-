@@ -69,12 +69,34 @@ struct ComprehensiveChatsView: View {
         }
         .onAppear {
             viewModel.loadChats()
+            openPendingChat(NotificationManager.shared.pendingChatId)
+        }
+        // Tapped a message notification (or the in-app banner): open that conversation.
+        .onReceive(NotificationManager.shared.$pendingChatId) { chatId in
+            openPendingChat(chatId)
         }
         .onChange(of: authManager.isAuthenticated) { oldValue, newValue in
             if newValue {
                 viewModel.loadChats()
             } else {
                 viewModel.clearChats()
+            }
+        }
+    }
+    
+    private func openPendingChat(_ chatId: String?) {
+        guard let chatId, authManager.isAuthenticated else { return }
+        NotificationManager.shared.pendingChatId = nil
+        // Already looking at it.
+        if NotificationManager.shared.openChatId == chatId || selectedChat?.id == chatId { return }
+        if let chat = viewModel.chats.first(where: { $0.id == chatId }) {
+            selectedChat = chat
+            return
+        }
+        // Not in the list yet (e.g. the app was just opened from the notification): load it.
+        Task {
+            if let chat = try? await DatabaseManager.shared.fetchChat(id: chatId) {
+                await MainActor.run { selectedChat = chat }
             }
         }
     }
