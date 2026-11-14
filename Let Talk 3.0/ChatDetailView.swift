@@ -11,8 +11,6 @@ struct ChatDetailView: View {
     @State private var showDocumentPicker = false
     @State private var showLocationPicker = false
     @State private var showContactPicker = false
-    @State private var showTranslation = false
-    @State private var messageToTranslate: Message?
     @State private var scrollToBottom = false
     
     init(chat: Chat) {
@@ -31,11 +29,6 @@ struct ChatDetailView: View {
         }
         .onDisappear {
             viewModel.stopListening()
-        }
-        .sheet(isPresented: $showTranslation) {
-            if let message = messageToTranslate {
-                TranslationView(message: message)
-            }
         }
         .actionSheet(isPresented: $showAttachmentPicker) {
             ActionSheet(title: Text("Add Attachment"), buttons: [
@@ -80,11 +73,7 @@ struct ChatDetailView: View {
                     ForEach(viewModel.messageGroups.keys.sorted(), id: \.self) { date in
                         Section(header: DateHeader(date: date)) {
                             ForEach(viewModel.messageGroups[date] ?? []) { message in
-                                MessageBubble(
-                                    message: message,
-                                    showTranslation: $showTranslation,
-                                    messageToTranslate: $messageToTranslate
-                                )
+                                MessageBubble(message: message)
                                 .id(message.id)
                             }
                         }
@@ -193,8 +182,8 @@ struct ChatHeader: View {
 
 struct MessageBubble: View {
     let message: Message
-    @Binding var showTranslation: Bool
-    @Binding var messageToTranslate: Message?
+    @ObservedObject private var translator = MessageTranslator.shared
+    @State private var showOriginal = false
     
     var body: some View {
         if message.type == .system {
@@ -271,10 +260,39 @@ struct MessageBubble: View {
         }
     }
     
+    /// Incoming messages are shown in my language; "Show Original" reveals what the sender typed.
     private var textContent: some View {
-        Text(message.content)
-            .foregroundColor(message.isOutgoing ? .white : .primary)
-            .fixedSize(horizontal: false, vertical: true)
+        let translated = message.isOutgoing ? nil : translator.translation(for: message)
+        return VStack(alignment: .leading, spacing: DS.spacingXS) {
+            Text(showOriginal ? message.content : (translated ?? message.content))
+                .foregroundColor(message.isOutgoing ? .white : .primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+
+            if translated != nil {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { showOriginal.toggle() }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "translate")
+                        Text(showOriginal ? "Show Translation" : translationLabel)
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundColor(.accentColor)
+                    .frame(minHeight: 28)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(showOriginal ? "Shows the message in your language" : "Shows the message as it was sent")
+            }
+        }
+    }
+
+    private var translationLabel: String {
+        if let name = translator.sourceLanguageName(for: message) {
+            return "Translated from \(name) · Show Original"
+        }
+        return "Translated · Show Original"
     }
     
     private var imageContent: some View {
@@ -414,17 +432,14 @@ struct MessageBubble: View {
         Group {
             if message.type == .text {
                 Button(action: {
-                    UIPasteboard.general.string = message.content
+                    UIPasteboard.general.string = showOriginal
+                        ? message.content
+                        : (translator.translation(for: message) ?? message.content)
                 }) {
                     Label("Copy", systemImage: "doc.on.doc")
                 }
-                
-                Button(action: {
-                    messageToTranslate = message
-                    showTranslation = true
-                }) {
-                    Label("Translate", systemImage: "text.bubble")
-                }
+                // The old "Translate" item showed fake text ("Translated: …"); incoming messages
+                // are now translated automatically, with Show Original on the bubble.
             }
             // "Retry" and "Delete" were removed: they had no implementation (tapping did nothing).
         }
@@ -549,35 +564,7 @@ struct DateHeader: View {
 }
 
 // MARK: - Missing Components
-struct TranslationView: View {
-    let message: Message
-    @Environment(\.presentationMode) var presentationMode
-    @StateObject private var viewModel = TranslationViewModel()
-    
-    var body: some View {
-        NavigationView {
-            VStack {
-                Text("Original: \(message.content)")
-                    .padding()
-                
-                if viewModel.isTranslating {
-                    ProgressView()
-                } else {
-                    Text("Translation: \(viewModel.translatedText)")
-                        .padding()
-                }
-            }
-            .navigationTitle("Translation")
-            .navigationBarItems(trailing: Button("Done") {
-                presentationMode.wrappedValue.dismiss()
-            })
-        }
-        .onAppear {
-            viewModel.translate(text: message.content)
-        }
-    }
-}
-
+// (TranslationViewModel is still used by VideoStreamView.)
 class TranslationViewModel: ObservableObject {
     @Published var translatedText = ""
     @Published var isTranslating = false

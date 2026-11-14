@@ -1,7 +1,11 @@
 // POST (no body) with the user's JWT -> deletes the caller's data and auth user (Guideline 5.1.1(v)).
 // Uses the service role key, which exists only inside the function runtime.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared_cors.ts";
+// CORS headers inlined (no ../_shared_cors.ts import) so the file also deploys from the dashboard editor.
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -22,6 +26,8 @@ Deno.serve(async (req) => {
   await run("contacts", admin.from("contacts").delete().eq("owner_id", id));
   await run("blocks", admin.from("blocks").delete().or(`blocker_id.eq.${id},blocked_id.eq.${id}`));
   await run("push_tokens", admin.from("push_tokens").delete().eq("user_id", id));
+  await run("call_signals", admin.from("call_signals").delete().eq("sender_id", id));
+  await run("reports", admin.from("reports").delete().eq("reporter_id", id));
 
   // Storage objects under the user's folder (avatars/attachments), best effort.
   const bucket = Deno.env.get("SUPABASE_STORAGE_BUCKET") ?? "public";

@@ -53,6 +53,22 @@ final class ContactManager: ObservableObject {
         }
     }
 
+    /// Adds a Let Talk user by their account ID (QR code). Returns the existing contact if
+    /// they're already saved.
+    func addContact(letTalkUserId userId: String) async throws -> Contact {
+        guard let me = AuthManager.shared.currentUserId else { throw QRAddError.notSignedIn }
+        guard userId.lowercased() != me.lowercased() else { throw QRAddError.ownCode }
+
+        let saved = await MainActor.run { contacts }
+        if let existing = saved.first(where: { $0.userId?.lowercased() == userId.lowercased() }) {
+            return existing
+        }
+
+        let contact = try await DatabaseManager.shared.addContact(letTalkUserId: userId)
+        await loadContacts()
+        return contact
+    }
+
     func addContact(_ contact: Contact) async throws {
         if dataPersistence.isOfflineMode {
             var updatedContacts = contacts

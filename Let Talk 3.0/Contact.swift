@@ -10,6 +10,8 @@ struct Contact: Identifiable, Hashable, Codable {
     var imageURL: String?
     var lastSeen: Date?
     var isOnline: Bool = false
+    /// The Let Talk account this contact belongs to, when known (e.g. added by QR code).
+    var userId: String? = nil
     
     var initials: String {
         let components = name.components(separatedBy: " ")
@@ -30,7 +32,7 @@ struct Contact: Identifiable, Hashable, Codable {
     
     // Codable conformance
     enum CodingKeys: String, CodingKey {
-        case id, name, phone, email, lastMessage, imageURL, lastSeen, isOnline
+        case id, name, phone, email, lastMessage, imageURL, lastSeen, isOnline, userId
     }
     
     init(id: String = UUID().uuidString, name: String, phone: String, email: String, lastMessage: String? = nil, image: UIImage? = nil) {
@@ -53,6 +55,7 @@ struct Contact: Identifiable, Hashable, Codable {
         imageURL = try container.decodeIfPresent(String.self, forKey: .imageURL)
         lastSeen = try container.decodeIfPresent(Date.self, forKey: .lastSeen)
         isOnline = try container.decodeIfPresent(Bool.self, forKey: .isOnline) ?? false
+        userId = try container.decodeIfPresent(String.self, forKey: .userId)
     }
     
     func encode(to encoder: Encoder) throws {
@@ -65,6 +68,7 @@ struct Contact: Identifiable, Hashable, Codable {
         try container.encodeIfPresent(imageURL, forKey: .imageURL)
         try container.encodeIfPresent(lastSeen, forKey: .lastSeen)
         try container.encode(isOnline, forKey: .isOnline)
+        try container.encodeIfPresent(userId, forKey: .userId)
     }
     
     // Sample contacts for preview and testing

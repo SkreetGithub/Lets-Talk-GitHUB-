@@ -11,6 +11,10 @@ enum Config {
     static let supabaseAnonKey = valueFromInfoPlist("SUPABASE_ANON_KEY") ?? "YOUR_SUPABASE_ANON_KEY"
     static let supabaseStorageBucket = valueFromInfoPlist("SUPABASE_STORAGE_BUCKET") ?? "public"
 
+    /// Where Supabase sends the user back after Sign in with Google. Must be listed in
+    /// Supabase → Authentication → URL Configuration → Redirect URLs.
+    static let authCallbackURL = URL(string: "lettalk://auth-callback")!
+
     static var supabaseURL: URL {
         guard let url = URL(string: supabaseURLString) else {
             preconditionFailure("Invalid SUPABASE_URL: \(supabaseURLString)")

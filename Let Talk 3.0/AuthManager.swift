@@ -77,16 +77,19 @@ final class AuthManager: ObservableObject {
     /// Name and phone are also stored in the auth user's metadata, so they are not lost when
     /// the profile row can only be created after the email is confirmed.
     @discardableResult
-    func signUp(email: String, password: String, name: String, phone: String = "") async throws -> Bool {
+    func signUp(email: String, password: String, name: String, phone: String = "",
+                gender: VoiceGender? = nil) async throws -> Bool {
         guard NetworkMonitorService.shared.isConnected else { throw AuthError.networkError }
         await MainActor.run { self.isLoading = true }
         defer { Task { @MainActor in self.isLoading = false } }
 
         do {
+            var metadata: [String: AnyJSON] = ["name": .string(name), "phone": .string(phone)]
+            if let gender { metadata["gender"] = .string(gender.rawValue) }
             let response = try await client.auth.signUp(
                 email: email,
                 password: password,
-                data: ["name": .string(name), "phone": .string(phone)]
+                data: metadata
             )
 
             guard let session = response.session else {
@@ -109,7 +112,9 @@ final class AuthManager: ObservableObject {
                 lastSeen: Date(),
                 isOnline: true,
                 deviceTokens: nil,
-                savedPhoneNumbers: []
+                savedPhoneNumbers: [],
+                gender: gender?.rawValue,
+                voiceId: gender?.defaultVoiceId
             ))
             // Sets isAuthenticated / needsPhoneVerification from the saved phone number.
             await fetchUserProfile(userId: userId)
@@ -147,6 +152,35 @@ final class AuthManager: ObservableObject {
                 }
             }
         } catch {
+            await MainActor.run { self.error = error }
+            throw error
+        }
+    }
+
+    /// Sign in with Google through Supabase Auth (OAuth + PKCE in an in-app browser sheet).
+    /// Requires the Google provider in Supabase (Authentication → Providers → Google) and
+    /// lettalk://auth-callback in the allowed Redirect URLs. New users then follow the same
+    /// path as Sign in with Apple: profile created from the Google name/email, then the
+    /// phone-number step (needsPhoneVerification), then the translation consent on first use.
+    /// Returns false if the user closed the Google sheet.
+    @discardableResult
+    func signInWithGoogle() async throws -> Bool {
+        guard NetworkMonitorService.shared.isConnected else { throw AuthError.networkError }
+        await MainActor.run { self.isLoading = true }
+        defer { Task { @MainActor in self.isLoading = false } }
+
+        do {
+            let session = try await client.auth.signInWithOAuth(
+                provider: .google,
+                redirectTo: Config.authCallbackURL,
+                queryParams: [(name: "prompt", value: "select_account")]
+            )
+            await fetchUserProfile(userId: session.user.id.uuidString.lowercased())
+            return true
+        } catch {
+            if let webError = error as? ASWebAuthenticationSessionError, webError.code == .canceledLogin {
+                return false
+            }
             await MainActor.run { self.error = error }
             throw error
         }
@@ -341,13 +375,18 @@ final class AuthManager: ObservableObject {
         // No profile row yet (e.g. first sign-in after confirming email). Create one from the
         // auth user's metadata, insert-only so it can never replace a real profile.
         let user = try? await client.auth.session.user
-        let name = Self.metadataString(user?.userMetadata["name"]) ?? "User"
+        // "name" from email sign-up; "full_name" is what Google (and other OAuth providers) send.
+        let name = Self.metadataString(user?.userMetadata["name"])
+            ?? Self.metadataString(user?.userMetadata["full_name"])
+            ?? "User"
         let phone = Self.metadataString(user?.userMetadata["phone"]) ?? ""
         let email = user?.email ?? ""
+        let gender = Self.metadataString(user?.userMetadata["gender"]).flatMap(VoiceGender.init(rawValue:))
         let newRow = ProfileRow(
             id: userId, email: email, name: name, phone: phone, photoURL: nil,
             createdAt: Date(), lastSeen: Date(), isOnline: true,
-            deviceTokens: nil, savedPhoneNumbers: []
+            deviceTokens: nil, savedPhoneNumbers: [],
+            gender: gender?.rawValue, voiceId: gender?.defaultVoiceId
         )
         do {
             _ = try await client.from("profiles")
@@ -373,6 +412,34 @@ final class AuthManager: ObservableObject {
         _ = try await client.from("profiles")
             .upsert(row)
             .execute()
+    }
+
+    /// Saves "my language" to the profile, so message notifications arrive translated into it.
+    func syncLanguage(_ code: String) async {
+        guard let userId = currentUserId else { return }
+        struct LanguageUpdate: Encodable { let language: String }
+        _ = try? await client.from("profiles")
+            .update(LanguageUpdate(language: code))
+            .eq("id", value: userId)
+            .execute()
+    }
+
+    /// Saves the translation voice others hear for this user ("male-1" … "female-8").
+    func updateVoice(_ voiceId: String) async throws {
+        guard let userId = currentUserId else { throw AuthError.userNotFound }
+        let gender: VoiceGender = voiceId.hasPrefix(VoiceGender.female.rawValue) ? .female : .male
+        struct VoiceUpdate: Encodable {
+            let gender: String
+            let voice_id: String
+        }
+        _ = try await client.from("profiles")
+            .update(VoiceUpdate(gender: gender.rawValue, voice_id: voiceId))
+            .eq("id", value: userId)
+            .execute()
+        await MainActor.run {
+            self.currentUser?.gender = gender
+            self.currentUser?.voiceId = voiceId
+        }
     }
 
     private func updateProfileFields(userId: String, fields: [String: ProfileValue]) async throws {
@@ -479,6 +546,10 @@ struct User: Identifiable, Codable {
     var deviceTokens: [String]?
     var settings: UserSettings?
     var savedPhoneNumbers: [SavedPhoneNumber] = []
+    /// Kind of voice others hear for this user's translated speech (nil for older accounts).
+    var gender: VoiceGender?
+    /// Selected translation voice, e.g. "female-3" (nil = the default for `gender`).
+    var voiceId: String?
 
     struct UserSettings: Codable {
         var notifications: Bool
@@ -548,6 +619,10 @@ private struct ProfileRow: Codable {
     let isOnline: Bool
     let deviceTokens: [String]?
     let savedPhoneNumbers: [SavedPhoneNumber]
+    // Optional so rows saved before these columns existed still decode, and nil values are
+    // left out of upserts instead of overwriting a saved choice.
+    var gender: String? = nil
+    var voiceId: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -560,6 +635,8 @@ private struct ProfileRow: Codable {
         case isOnline = "is_online"
         case deviceTokens = "device_tokens"
         case savedPhoneNumbers = "saved_phone_numbers"
+        case gender
+        case voiceId = "voice_id"
     }
 
     var asUser: User {
@@ -575,6 +652,8 @@ private struct ProfileRow: Codable {
         )
         u.deviceTokens = deviceTokens
         u.savedPhoneNumbers = savedPhoneNumbers
+        u.gender = gender.flatMap(VoiceGender.init(rawValue:))
+        u.voiceId = voiceId
         return u
     }
 }

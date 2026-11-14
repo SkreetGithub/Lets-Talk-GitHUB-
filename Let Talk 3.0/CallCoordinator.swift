@@ -106,7 +106,10 @@ final class CallCoordinator: ObservableObject {
     /// Call a saved contact. Contacts are address-book style entries, so resolve by phone.
     /// (Contacts built from a Let Talk profile carry the user ID and have no usable phone.)
     func startCall(to contact: Contact, isVideo: Bool) {
-        if contact.phone.filter(\.isNumber).count >= 7 {
+        if let userId = contact.userId {
+            // Known Let Talk account (e.g. added by QR code): no phone lookup needed.
+            startCall(toUserId: userId.lowercased(), isVideo: isVideo)
+        } else if contact.phone.filter(\.isNumber).count >= 7 {
             startCall(toPhone: contact.phone, displayName: contact.name, isVideo: isVideo)
         } else if UUID(uuidString: contact.id) != nil {
             startCall(toUserId: contact.id.lowercased(), isVideo: isVideo)

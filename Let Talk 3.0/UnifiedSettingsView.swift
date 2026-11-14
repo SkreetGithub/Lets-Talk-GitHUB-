@@ -16,6 +16,8 @@ struct UnifiedSettingsView: View {
     @State private var showAudioSettings = false
     @State private var showDataManagement = false
     @State private var showProfileEditor = false
+    @State private var showMyQRCode = false
+    @State private var showVoiceSettings = false
     @State private var showExportSettings = false
     @State private var showImportSettings = false
     @State private var isResettingPassword = false
@@ -158,8 +160,26 @@ struct UnifiedSettingsView: View {
                 }
             }
             .buttonStyle(PlainButtonStyle())
+
+            Button {
+                showMyQRCode = true
+            } label: {
+                Label("My QR Code", systemImage: "qrcode")
+            }
+
+            Button {
+                showVoiceSettings = true
+            } label: {
+                Label("Voice Settings", systemImage: "waveform")
+            }
         } header: {
             Text("Profile")
+        }
+        .sheet(isPresented: $showMyQRCode) {
+            MyQRCodeView()
+        }
+        .sheet(isPresented: $showVoiceSettings) {
+            VoiceSettingsView()
         }
     }
     
@@ -662,7 +682,9 @@ struct LanguageSettingsView: View {
         ("ru", "Русский"),
         ("ja", "日本語"),
         ("ko", "한국어"),
-        ("zh", "中文")
+        ("zh", "中文"),
+        ("ar", "العربية"),
+        ("hi", "हिन्दी")
     ]
     
     var body: some View {

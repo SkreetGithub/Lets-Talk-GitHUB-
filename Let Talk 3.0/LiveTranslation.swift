@@ -34,7 +34,10 @@ final class LiveTranslationSession: ObservableObject {
     static let shared = LiveTranslationSession()
 
     @Published var isActive = false
-    @Published var myLanguage: LiveLanguage = LiveLanguage.named(code: String(Locale.current.language.languageCode?.identifier ?? "en")) ?? LiveLanguage.all[0]
+    /// Starts from Settings → Language (the same language chat messages are translated into).
+    @Published var myLanguage: LiveLanguage = LiveLanguage.named(code: SettingsManager.shared.settings.language)
+        ?? LiveLanguage.named(code: String(Locale.current.language.languageCode?.identifier ?? "en"))
+        ?? LiveLanguage.all[0]
     @Published var peerLanguage: LiveLanguage?
     @Published var subtitle = ""            // what the other person said, in my language
     @Published var mySpeech = ""            // what I'm saying right now (original)
@@ -56,7 +59,13 @@ final class LiveTranslationSession: ObservableObject {
         let source: String?
         let original: String?
         let translated: String?
+        /// The sender's translation voice ("male-3"); the listener plays the translation in it.
+        var voice: String? = nil
     }
+
+    /// The other person's chosen voice (from their "lang" packet); nil = iPhone voice.
+    private var peerVoiceId: String?
+    private var myVoiceId: String? { AuthManager.shared.currentUser?.effectiveVoiceId }
 
     // MARK: Lifecycle
 
@@ -67,7 +76,7 @@ final class LiveTranslationSession: ObservableObject {
         errorMessage = nil
         lastSent = ""
         consecutiveFailures = 0
-        sendPacket(Packet(type: "lang", lang: myLanguage.code, source: nil, original: nil, translated: nil))
+        sendPacket(Packet(type: "lang", lang: myLanguage.code, source: nil, original: nil, translated: nil, voice: myVoiceId))
         listen()
     }
 
@@ -76,16 +85,27 @@ final class LiveTranslationSession: ObservableObject {
         debounceTask?.cancel()
         recognizer.stopRecording()
         synthesizer.stopSpeaking(at: .immediate)
+        TranslatedVoicePlayer.shared.stop()
+        peerVoiceId = nil
         mySpeech = ""
         subtitle = ""
         lastSent = ""
     }
 
+    /// Picks up a language changed in Settings (only between calls; mid-call use changeMyLanguage).
+    func adoptSavedLanguage() {
+        guard !isActive, let saved = LiveLanguage.named(code: SettingsManager.shared.settings.language) else { return }
+        myLanguage = saved
+    }
+
     func changeMyLanguage(_ language: LiveLanguage) {
         myLanguage = language
+        if SettingsManager.shared.settings.language != language.code {
+            SettingsManager.shared.setLanguage(language.code)
+        }
         guard isActive else { return }
         recognizer.stopRecording()
-        sendPacket(Packet(type: "lang", lang: language.code, source: nil, original: nil, translated: nil))
+        sendPacket(Packet(type: "lang", lang: language.code, source: nil, original: nil, translated: nil, voice: myVoiceId))
         listen()
     }
 
@@ -145,7 +165,8 @@ final class LiveTranslationSession: ObservableObject {
         guard !chunk.isEmpty, let target = peerLanguage?.code ?? defaultPeerCode() else { return }
         do {
             let response = try await Backend.translate(text: chunk, source: myLanguage.code, target: target)
-            sendPacket(Packet(type: "subtitle", lang: target, source: myLanguage.code, original: chunk, translated: response.translatedText))
+            sendPacket(Packet(type: "subtitle", lang: target, source: myLanguage.code, original: chunk,
+                              translated: response.translatedText, voice: myVoiceId))
         } catch {
             errorMessage = "Translation is unavailable right now."
         }
@@ -166,6 +187,7 @@ final class LiveTranslationSession: ObservableObject {
                 peerLanguage = lang
                 detectedLanguageName = lang.name
             }
+            if let voice = packet.voice { peerVoiceId = voice }
         case "subtitle":
             guard let text = packet.translated, !text.isEmpty else { return }
             if let source = packet.source, let lang = LiveLanguage.named(code: source) {
@@ -173,13 +195,35 @@ final class LiveTranslationSession: ObservableObject {
             }
             subtitle = text
             scheduleSubtitleClear()
-            if speakAloud { speak(text) }
+            if speakAloud { speak(text, voiceId: packet.voice ?? peerVoiceId) }
         default:
             break
         }
     }
 
-    private func speak(_ text: String) {
+    /// Speaks the other person's translated words in THEIR chosen voice, in MY language
+    /// (Google WaveNet via `speak`). Falls back to the iPhone's voice if they have no voice
+    /// set or the server can't be reached, so a translation is never silently dropped.
+    private func speak(_ text: String, voiceId: String?) {
+        guard let voiceId else {
+            speakWithDeviceVoice(text)
+            return
+        }
+        // Block the mic right away; extended once the clip's real length is known.
+        ignoreSpeechUntil = Date().addingTimeInterval(Double(text.count) * 0.08 + 0.8)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let duration = try await TranslatedVoicePlayer.shared.speak(text, voiceId: voiceId, language: self.myLanguage.code)
+                self.ignoreSpeechUntil = max(self.ignoreSpeechUntil, Date().addingTimeInterval(duration + 0.5))
+            } catch {
+                debugLog("Translated voice unavailable, using device voice:", error)
+                self.speakWithDeviceVoice(text)
+            }
+        }
+    }
+
+    private func speakWithDeviceVoice(_ text: String) {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: myLanguage.locale)
         utterance.rate = 0.5

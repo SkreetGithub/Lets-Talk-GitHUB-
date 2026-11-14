@@ -82,15 +82,17 @@ final class DatabaseManager: ObservableObject {
     }
 
     private func fetchMessages(chatId: String) async throws -> [Message] {
+        // The NEWEST 50 (ascending + limit returned the oldest 50, so once a chat passed 50
+        // messages new ones never appeared). Reversed back into reading order.
         let response = try await client.from("messages")
             .select()
             .eq("chat_id", value: chatId)
-            .order("timestamp", ascending: true)
+            .order("timestamp", ascending: false)
             .limit(50)
             .execute()
 
         let rows = try decoder.decode([MessageRow].self, from: response.data)
-        return rows.map { $0.asMessage }
+        return rows.reversed().map { $0.asMessage }
     }
 
     // MARK: - Chats
@@ -247,6 +249,38 @@ final class DatabaseManager: ObservableObject {
         _ = try await client.from("contacts")
             .insert(row)
             .execute()
+    }
+
+    /// Adds a Let Talk user (e.g. from a scanned QR code) as a contact, using their profile's
+    /// name, phone and email. Adding the same person twice is a no-op.
+    func addContact(letTalkUserId userId: String) async throws -> Contact {
+        guard let ownerId = AuthManager.shared.currentUserId else { throw QRAddError.notSignedIn }
+
+        let user: User
+        do {
+            user = try await getUser(id: userId)
+        } catch {
+            throw QRAddError.accountNotFound
+        }
+
+        let row = ContactInsert(
+            id: UUID().uuidString,
+            ownerId: ownerId,
+            name: user.name,
+            phone: user.phone,
+            email: user.email,
+            createdAt: ISO8601DateFormatter().string(from: Date()),
+            contactUserId: userId
+        )
+        // Unique (owner_id, contact_user_id): a second scan of the same code adds nothing.
+        _ = try await client.from("contacts")
+            .upsert(row, onConflict: "owner_id,contact_user_id", ignoreDuplicates: true)
+            .execute()
+
+        var contact = Contact(id: row.id, name: user.name, phone: user.phone, email: user.email)
+        contact.userId = userId
+        contact.imageURL = user.photoURL
+        return contact
     }
 
     func deleteContact(_ contactId: String) async throws {
@@ -430,6 +464,8 @@ private struct ContactInsert: Codable {
     let phone: String
     let email: String
     let createdAt: String
+    /// Set only when the contact is a known Let Talk user (omitted from the JSON when nil).
+    var contactUserId: String? = nil
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -438,6 +474,7 @@ private struct ContactInsert: Codable {
         case phone
         case email
         case createdAt = "created_at"
+        case contactUserId = "contact_user_id"
     }
 }
 
@@ -587,12 +624,14 @@ private struct ContactRowData: Codable {
     let imageURL: String?
     let lastSeen: Date?
     let isOnline: Bool?
+    let contactUserId: String?
 
     enum CodingKeys: String, CodingKey {
         case id
         case name
         case phone
         case email
+        case contactUserId = "contact_user_id"
         case lastMessage = "last_message"
         case imageURL = "image_url"
         case lastSeen = "last_seen"
@@ -604,6 +643,7 @@ private struct ContactRowData: Codable {
         c.imageURL = imageURL
         c.lastSeen = lastSeen
         c.isOnline = isOnline ?? false
+        c.userId = contactUserId
         return c
     }
 }

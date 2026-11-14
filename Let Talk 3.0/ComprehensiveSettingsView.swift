@@ -5,6 +5,8 @@ struct ComprehensiveSettingsView: View {
     @EnvironmentObject var settingsManager: SettingsManager
     @EnvironmentObject var authManager: AuthManager
     @State private var showSignOutAlert = false
+    @State private var showMyQRCode = false
+    @State private var showVoiceSettings = false
     @State private var showDeleteAccountAlert = false
     @State private var deleteErrorMessage: String?
     @State private var showExportSettings = false
@@ -122,8 +124,26 @@ struct ComprehensiveSettingsView: View {
                 .foregroundColor(.blue)
             }
             .padding(.vertical, 8)
+
+            Button {
+                showMyQRCode = true
+            } label: {
+                Label("My QR Code", systemImage: "qrcode")
+            }
+
+            Button {
+                showVoiceSettings = true
+            } label: {
+                Label("Voice Settings", systemImage: "waveform")
+            }
         } header: {
             Text("Profile")
+        }
+        .sheet(isPresented: $showMyQRCode) {
+            MyQRCodeView()
+        }
+        .sheet(isPresented: $showVoiceSettings) {
+            VoiceSettingsView()
         }
     }
     

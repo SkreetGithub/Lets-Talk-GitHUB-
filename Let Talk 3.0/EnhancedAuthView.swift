@@ -15,6 +15,7 @@ struct EnhancedAuthView: View {
     @State private var confirmPassword = ""
     @State private var name = ""
     @State private var phone = ""
+    @State private var gender: VoiceGender?
     @State private var isLoading = false
     @State private var errorMessage = ""
     @State private var infoMessage = ""
@@ -74,6 +75,9 @@ struct EnhancedAuthView: View {
                             CustomTextField(text: $phone, placeholder: "Phone Number", icon: "phone.fill",
                                             keyboardType: .phonePad)
                                 .textContentType(.telephoneNumber)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+
+                            voicePicker
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
 
@@ -135,6 +139,19 @@ struct EnhancedAuthView: View {
                         )
                         .disabled(isLoading || !networkMonitor.isConnected)
 
+                        Button(action: signInWithGoogle) {
+                            Text(isLoginMode ? "Sign in with Google" : "Sign up with Google")
+                                .font(.system(size: 19, weight: .semibold))
+                                .foregroundColor(.black)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 50)
+                                .background(RoundedRectangle(cornerRadius: 12).fill(Color.white))
+                                .contentShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(PressableStyle())
+                        .disabled(isLoading || !networkMonitor.isConnected)
+                        .accessibilityLabel(isLoginMode ? "Sign in with Google" : "Sign up with Google")
+
                         if isLoginMode {
                             Button("Forgot password?") { showForgotPassword = true }
                                 .font(.system(size: 15, weight: .medium))
@@ -178,6 +195,50 @@ struct EnhancedAuthView: View {
         }
     }
 
+    /// Male / Female choice for the voice other people hear when this user's speech is
+    /// translated. Required at sign-up; changeable later in Settings → Voice Settings.
+    private var voicePicker: some View {
+        VStack(alignment: .leading, spacing: DS.spacingS) {
+            Text("Your translated voice")
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.white)
+                .padding(.leading, DS.spacingS)
+
+            HStack(spacing: DS.spacingS) {
+                ForEach(VoiceGender.allCases) { option in
+                    let selected = gender == option
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) { gender = option }
+                        Haptics.tap()
+                    } label: {
+                        HStack(spacing: DS.spacingXS) {
+                            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                            Text(option.title)
+                        }
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(selected ? Self.actionPink : .white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(RoundedRectangle(cornerRadius: 25)
+                            .fill(selected ? Color.white : Color.white.opacity(0.1)))
+                        .overlay(RoundedRectangle(cornerRadius: 25)
+                            .stroke(Color.white.opacity(selected ? 0 : 0.2), lineWidth: 1))
+                        .contentShape(RoundedRectangle(cornerRadius: 25))
+                    }
+                    .buttonStyle(PressableStyle())
+                    .accessibilityLabel("\(option.title) voice")
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+
+            Text("People you call hear your translated speech in this voice. You can change it anytime in Settings.")
+                .font(.footnote)
+                .foregroundColor(.white.opacity(0.8))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, DS.spacingS)
+        }
+    }
+
     private func messagePill(_ text: String, icon: String, tint: Color) -> some View {
         Label(text, systemImage: icon)
             .font(.footnote.weight(.semibold))
@@ -214,7 +275,8 @@ struct EnhancedAuthView: View {
                         email: email.trimmingCharacters(in: .whitespaces),
                         password: password,
                         name: name.trimmingCharacters(in: .whitespaces),
-                        phone: normalizedPhone
+                        phone: normalizedPhone,
+                        gender: gender
                     )
                     await MainActor.run {
                         Haptics.success()
@@ -242,6 +304,20 @@ struct EnhancedAuthView: View {
     private func handleAppleSignInSuccess() {
         Haptics.success()
         showPhoneVerification = authManager.needsPhoneVerification
+    }
+
+    /// Same onboarding as Apple: a new Google user picks a phone number next.
+    private func signInWithGoogle() {
+        errorMessage = ""
+        Task {
+            do {
+                guard try await authManager.signInWithGoogle() else { return }   // closed the sheet
+                handleAppleSignInSuccess()
+            } catch {
+                errorMessage = "Google sign-in didn't complete. Please try again."
+                Haptics.failure()
+            }
+        }
     }
 
     private func toggleMode() {
@@ -276,6 +352,10 @@ struct EnhancedAuthView: View {
             let digitCount = normalizedPhone.filter(\.isNumber).count
             if digitCount < 10 || digitCount > 15 {
                 errorMessage = "Please enter a valid phone number."
+                return false
+            }
+            if gender == nil {
+                errorMessage = "Please choose your translated voice: Male or Female."
                 return false
             }
             if password.count < 6 {

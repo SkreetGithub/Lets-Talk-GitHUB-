@@ -130,9 +130,16 @@ final class SettingsManager: ObservableObject {
 
     // MARK: - Language Management
 
+    /// "My language": what incoming messages and call subtitles are translated into. Kept in
+    /// step with the call screen's language and saved to the profile, so message
+    /// notifications sent to this user arrive in this language too.
     func setLanguage(_ language: String) {
         settings.language = language
         saveSettings()
+        Task { @MainActor in
+            LiveTranslationSession.shared.adoptSavedLanguage()
+            await AuthManager.shared.syncLanguage(language)
+        }
     }
 
     func setSourceLanguage(_ language: String) {

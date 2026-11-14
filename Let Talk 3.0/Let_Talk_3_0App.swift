@@ -89,11 +89,18 @@ struct Let_Talk_3_0App: App {
                 startSplashTimer()
                 CallKitManager.shared.registerVoIP()
             }
+            // OAuth return (lettalk://auth-callback). The in-app Google sheet normally catches it
+            // itself; this covers the case where the system hands the link to the app instead.
+            .onOpenURL { url in
+                SupabaseManager.client.auth.handle(url)
+            }
             .onChange(of: authManager.isAuthenticated) { oldValue, newValue in
                 // Force UI update when authentication state changes
                 // This ensures the navigation happens immediately
                 if newValue {
                     CallKitManager.shared.uploadPendingToken()
+                    NotificationManager.shared.uploadPendingToken()
+                    Task { await AuthManager.shared.syncLanguage(SettingsManager.shared.settings.language) }
                     Task { await ModerationManager.shared.refresh() }
                 }
 

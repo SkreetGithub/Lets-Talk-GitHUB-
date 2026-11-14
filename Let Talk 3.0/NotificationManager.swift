@@ -42,7 +42,25 @@ class NotificationManager: NSObject, ObservableObject {
     @MainActor
     func didRegisterForRemoteNotifications(token: String) async {
         UserDefaults.standard.set(token, forKey: "apnsToken")
-        // Optional: upload token to backend once Supabase profile storage is migrated.
+        uploadPendingToken()
+    }
+
+    /// Stores this device's APNs token for the signed-in user, so message notifications reach
+    /// it. Called on registration and again after sign-in (registration can happen first).
+    func uploadPendingToken() {
+        guard let token = UserDefaults.standard.string(forKey: "apnsToken"),
+              let userId = AuthManager.shared.currentUserId else { return }
+        struct PushTokenRow: Encodable {
+            let user_id: String
+            let token: String
+            let kind: String
+            let updated_at: String
+        }
+        Task {
+            let row = PushTokenRow(user_id: userId, token: token, kind: "apns",
+                                   updated_at: ISO8601DateFormatter().string(from: Date()))
+            _ = try? await SupabaseManager.client.from("push_tokens").upsert(row).execute()
+        }
     }
     
     func showMessageNotification(message: String, senderName: String, profileImage: String? = nil) {

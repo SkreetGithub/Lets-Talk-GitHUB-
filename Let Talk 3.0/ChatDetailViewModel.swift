@@ -72,6 +72,10 @@ class ChatDetailViewModel: ObservableObject {
             } receiveValue: { [weak self] messages in
                 self?.messages = messages.sorted { $0.timestamp < $1.timestamp }
                 self?.markMessagesAsRead(messages)
+                // Incoming messages are shown in my language (translated on this phone).
+                Task { @MainActor in
+                    MessageTranslator.shared.translateIncoming(messages, myUserId: AuthManager.shared.currentUserId)
+                }
             }
             .store(in: &cancellables)
     }
@@ -112,12 +116,14 @@ class ChatDetailViewModel: ObservableObject {
         
         debugLog("Sending message from \(currentUserId) to \(contact.id): \(messageText)")
         
-        let message = Message(
+        var message = Message(
             senderId: currentUserId,
             receiverId: contact.id,
             content: messageText,
             type: .text
         )
+        // Tell the receiver which language this is in, so their phone can skip or target translation.
+        message.metadata = ["lang": SettingsManager.shared.settings.language]
         
         send(message)
         messageText = ""
@@ -284,7 +290,11 @@ class ChatDetailViewModel: ObservableObject {
                 try await databaseManager.sendMessage(message)
             } catch {
                 self.error = error
+                return
             }
+            // Notify the receiver (their notification shows the message in their language).
+            // Best effort: the message is already saved, so a failed push changes nothing.
+            try? await Backend.sendMessagePush(messageId: message.id)
         }
     }
     

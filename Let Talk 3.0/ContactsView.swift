@@ -316,6 +316,8 @@ struct AddContactView: View {
     @State private var selectedCountryCode = "+1"
     @State private var showPhoneGenerator = false
     @State private var generatedPhone = ""
+    @State private var showQRScanner = false
+    @State private var showContactSync = false
     @StateObject private var viewModel = AddContactViewModel()
     
     private let countryCodes = ["+1", "+44", "+33", "+49", "+39", "+34", "+81", "+86", "+91"]
@@ -323,6 +325,21 @@ struct AddContactView: View {
     var body: some View {
         NavigationView {
             Form {
+                Section {
+                    Button {
+                        showContactSync = true
+                    } label: {
+                        Label("Find Friends from Contacts", systemImage: "person.2.circle")
+                    }
+                    Button {
+                        showQRScanner = true
+                    } label: {
+                        Label("Scan QR Code", systemImage: "qrcode.viewfinder")
+                    }
+                } footer: {
+                    Text("See which of your contacts use Let Talk, or add someone instantly by scanning their code (Settings → My QR Code).")
+                }
+
                 Section("Contact Information") {
                     TextField("Name", text: $name)
                     
@@ -367,6 +384,15 @@ struct AddContactView: View {
                 }
             }
             .navigationTitle("Add Contact")
+            .sheet(isPresented: $showContactSync) {
+                ContactSyncView()
+            }
+            .sheet(isPresented: $showQRScanner) {
+                QRScannerView { _ in
+                    // Contact saved; the Contacts list refreshes itself. Close Add Contact too.
+                    presentationMode.wrappedValue.dismiss()
+                }
+            }
             .navigationBarItems(
                 leading: Button("Cancel") {
                     presentationMode.wrappedValue.dismiss()

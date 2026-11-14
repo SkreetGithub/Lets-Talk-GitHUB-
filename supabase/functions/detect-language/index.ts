@@ -1,6 +1,10 @@
 // POST { text } -> { language, confidence }   (Google Translate "detect")
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared_cors.ts";
+// CORS headers inlined (no ../_shared_cors.ts import) so the file also deploys from the dashboard editor.
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
