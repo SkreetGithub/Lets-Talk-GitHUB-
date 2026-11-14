@@ -10,8 +10,8 @@
 // Languages with fewer than 8 voices of a gender reuse them with a different pitch and speed,
 // so all 8 slots always sound distinct.
 //
-// Secret: GOOGLE_TRANSLATE_API_KEY (the same Google Cloud key; the project needs the
-// Cloud Text-to-Speech API enabled and the key must be allowed to call it).
+// Secret: GOOGLE_TTS_API_KEY (falls back to GOOGLE_TRANSLATE_API_KEY). The key's Google Cloud
+// project needs the Cloud Text-to-Speech API enabled, with active billing.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -112,9 +112,11 @@ async function slotsFor(languageCode: string): Promise<Slot[]> {
   return slots;
 }
 
+// GOOGLE_TTS_API_KEY: a Let Talk key (project let-talk-4) restricted to Cloud Text-to-Speech.
+// Falls back to GOOGLE_TRANSLATE_API_KEY until that secret is added.
 function apiKey(): string {
-  const key = Deno.env.get("GOOGLE_TRANSLATE_API_KEY");
-  if (!key) throw new Error("GOOGLE_TRANSLATE_API_KEY is not set");
+  const key = Deno.env.get("GOOGLE_TTS_API_KEY") || Deno.env.get("GOOGLE_TRANSLATE_API_KEY");
+  if (!key) throw new Error("GOOGLE_TTS_API_KEY is not set");
   return encodeURIComponent(key);
 }
 
