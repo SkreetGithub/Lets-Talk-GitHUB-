@@ -59,7 +59,9 @@ enum Backend {
         let detectedLanguage: String?
     }
     static func translate(text: String, source: String?, target: String, provider: String? = nil) async throws -> TranslateResponse {
-        try await call("translate", body: TranslateRequest(text: text, source: source, target: target, provider: provider))
+        // No explicit provider: use the one chosen in Settings › Translation Provider.
+        let chosen = provider ?? SettingsManager.shared.settings.translation.provider.backendValue
+        return try await call("translate", body: TranslateRequest(text: text, source: source, target: target, provider: chosen))
     }
 
     // Translated speech (Google WaveNet via the `speak` function).

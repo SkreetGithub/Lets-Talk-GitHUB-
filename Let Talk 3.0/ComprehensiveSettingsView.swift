@@ -1,149 +1,28 @@
 import SwiftUI
 
-struct ComprehensiveSettingsView: View {
-    @Environment(\.dismiss) private var dismissSettings
-    @EnvironmentObject var settingsManager: SettingsManager
-    @EnvironmentObject var authManager: AuthManager
-    @State private var showSignOutAlert = false
-    @State private var showMyQRCode = false
-    @State private var showVoiceSettings = false
-    @State private var showDeleteAccountAlert = false
-    @State private var deleteErrorMessage: String?
-    @State private var showExportSettings = false
-    @State private var showImportSettings = false
-    @State private var showThemePreview = false
+// The separate Settings screen that used to open from the Chats ⚙︎ button was merged into
+// More › Settings (UnifiedSettingsView). Its style controls live on here as "Chat & Call Style",
+// opened from More › Settings › Appearance.
+
+/// Theme, chat bubble and call screen styling.
+struct ChatStyleSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var settingsManager = SettingsManager.shared
     
     var body: some View {
         NavigationView {
             List {
-                // Profile Section
-                profileSection
-                
-                // Appearance Section
                 appearanceSection
-                
-                // Language & Translation Section
-                languageSection
-                
-                // Audio & Video Section
-                audioVideoSection
-                
-                // Notifications Section
-                notificationsSection
-                
-                // Privacy Section
-                privacySection
-                
-                // Chat & Call Section
                 chatCallSection
-                
-                // Data Management Section
-                dataManagementSection
-                
-                // Account Section
-                legalSection
-                accountSection
-                deleteAccountSection
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationTitle("Chat & Call Style")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                // This screen is presented as a sheet from Chats and had no way to close it.
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismissSettings() }
+                    Button("Done") { dismiss() }
                 }
             }
-        }
-        .alert("Sign Out", isPresented: $showSignOutAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Sign Out", role: .destructive) {
-                Task {
-                    try await authManager.signOut()
-                }
-            }
-        } message: {
-            Text("Are you sure you want to sign out?")
-        }
-        .alert("Delete Account", isPresented: $showDeleteAccountAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                Task {
-                    do {
-                        try await authManager.deleteAccount()
-                    } catch {
-                        deleteErrorMessage = error.localizedDescription
-                    }
-                }
-            }
-        } message: {
-            Text("This action cannot be undone. Your account, messages, contacts and call history will be permanently deleted.")
-        }
-        .alert("Couldn't delete account", isPresented: Binding(get: { deleteErrorMessage != nil }, set: { if !$0 { deleteErrorMessage = nil } })) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(deleteErrorMessage ?? "")
-        }
-    }
-    
-    // MARK: - Profile Section
-    private var profileSection: some View {
-        Section {
-            HStack(spacing: 16) {
-                // Profile Image
-                Circle()
-                    .fill(Color.blue.opacity(0.2))
-                    .frame(width: 60, height: 60)
-                    .overlay(
-                        Text(authManager.currentUser?.name.prefix(1).uppercased() ?? "U")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.blue)
-                    )
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(authManager.currentUser?.name ?? "User")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-                    
-                    Text(authManager.currentUser?.email ?? "user@example.com")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    
-                    Text(authManager.currentUser?.phone ?? "No phone number")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                Spacer()
-                
-                Button("Edit") {
-                    // Edit profile action
-                }
-                .font(.caption)
-                .foregroundColor(.blue)
-            }
-            .padding(.vertical, 8)
-
-            Button {
-                showMyQRCode = true
-            } label: {
-                Label("My QR Code", systemImage: "qrcode")
-            }
-
-            Button {
-                showVoiceSettings = true
-            } label: {
-                Label("Voice Settings", systemImage: "waveform")
-            }
-        } header: {
-            Text("Profile")
-        }
-        .sheet(isPresented: $showMyQRCode) {
-            MyQRCodeView()
-        }
-        .sheet(isPresented: $showVoiceSettings) {
-            VoiceSettingsView()
         }
     }
     
@@ -197,27 +76,6 @@ struct ComprehensiveSettingsView: View {
                             }
                         }
                     }
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Received Messages")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 8) {
-                            ForEach(ChatBubbleColor.allCases, id: \.self) { color in
-                                Circle()
-                                    .fill(color.color)
-                                    .frame(width: 30, height: 30)
-                                    .overlay(
-                                        Circle()
-                                            .stroke(Color.primary, lineWidth: settingsManager.settings.chatBubbles.receivedColor == color ? 2 : 0)
-                                    )
-                                    .onTapGesture {
-                                        settingsManager.setChatBubbleReceivedColor(color)
-                                    }
-                            }
-                        }
-                    }
                 }
             }
             .padding(.vertical, 8)
@@ -252,222 +110,6 @@ struct ComprehensiveSettingsView: View {
             .padding(.vertical, 8)
         } header: {
             Text("Appearance")
-        }
-    }
-    
-    // MARK: - Language Section
-    private var languageSection: some View {
-        Section {
-            // App Language
-            HStack {
-                Text("App Language")
-                Spacer()
-                Text(settingsManager.settings.language.uppercased())
-                    .foregroundColor(.secondary)
-            }
-            
-            // Source Language
-            HStack {
-                Text("Default Source Language")
-                Spacer()
-                Text(settingsManager.settings.sourceLanguage.uppercased())
-                    .foregroundColor(.secondary)
-            }
-            
-            // Target Language
-            HStack {
-                Text("Default Target Language")
-                Spacer()
-                Text(settingsManager.settings.targetLanguage.uppercased())
-                    .foregroundColor(.secondary)
-            }
-            
-            // Translation Settings
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Translation")
-                    .font(.headline)
-                    .foregroundColor(.primary)
-                
-                Toggle("Auto-translate", isOn: Binding(
-                    get: { settingsManager.settings.translation.autoTranslate },
-                    set: { settingsManager.setAutoTranslate($0) }
-                ))
-                
-                Toggle("Voice Translation", isOn: Binding(
-                    get: { settingsManager.settings.translation.voiceEnabled },
-                    set: { settingsManager.setVoiceEnabled($0) }
-                ))
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Translation Provider")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    
-                    Picker("Provider", selection: Binding(
-                        get: { settingsManager.settings.translation.provider },
-                        set: { settingsManager.setTranslationProvider($0) }
-                    )) {
-                        ForEach(TranslationProvider.allCases, id: \.self) { provider in
-                            Text(provider.displayName).tag(provider)
-                        }
-                    }
-                    .pickerStyle(SegmentedPickerStyle())
-                }
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Confidence Level")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    
-                    Slider(
-                        value: Binding(
-                            get: { settingsManager.settings.translation.confidence },
-                            set: { settingsManager.setTranslationConfidence($0) }
-                        ),
-                        in: 0.1...1.0,
-                        step: 0.1
-                    )
-                    
-                    Text("\(Int(settingsManager.settings.translation.confidence * 100))%")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding(.vertical, 8)
-        } header: {
-            Text("Language & Translation")
-        }
-    }
-    
-    // MARK: - Audio & Video Section
-    private var audioVideoSection: some View {
-        Section {
-            // Audio Settings
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Audio")
-                    .font(.headline)
-                    .foregroundColor(.primary)
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Volume")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    
-                    Slider(
-                        value: Binding(
-                            get: { settingsManager.settings.audio.volume },
-                            set: { settingsManager.setVolume($0) }
-                        ),
-                        in: 0.0...1.0,
-                        step: 0.1
-                    )
-                    
-                    Text("\(Int(settingsManager.settings.audio.volume * 100))%")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                Toggle("Vibration", isOn: Binding(
-                    get: { settingsManager.settings.audio.vibration },
-                    set: { settingsManager.setVibration($0) }
-                ))
-                
-                Toggle("Speaker Mode", isOn: Binding(
-                    get: { settingsManager.settings.audio.speakerMode },
-                    set: { settingsManager.setSpeakerMode($0) }
-                ))
-            }
-            .padding(.vertical, 8)
-            
-            // Video Settings
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Video")
-                    .font(.headline)
-                    .foregroundColor(.primary)
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Quality")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    
-                    Picker("Quality", selection: Binding(
-                        get: { settingsManager.settings.video.quality },
-                        set: { settingsManager.setVideoQuality($0) }
-                    )) {
-                        ForEach(VideoQuality.allCases, id: \.self) { quality in
-                            Text(quality.displayName).tag(quality)
-                        }
-                    }
-                    .pickerStyle(SegmentedPickerStyle())
-                }
-                
-                Toggle("Auto-start Video", isOn: Binding(
-                    get: { settingsManager.settings.video.autoStart },
-                    set: { settingsManager.setAutoStartVideo($0) }
-                ))
-                
-                Toggle("Mirror Front Camera", isOn: Binding(
-                    get: { settingsManager.settings.video.mirrorFrontCamera },
-                    set: { settingsManager.setMirrorFrontCamera($0) }
-                ))
-            }
-            .padding(.vertical, 8)
-        } header: {
-            Text("Audio & Video")
-        }
-    }
-    
-    // MARK: - Notifications Section
-    private var notificationsSection: some View {
-        Section {
-            Toggle("Message Notifications", isOn: Binding(
-                get: { settingsManager.settings.notifications.messages },
-                set: { settingsManager.setMessageNotifications($0) }
-            ))
-            
-            Toggle("Call Notifications", isOn: Binding(
-                get: { settingsManager.settings.notifications.calls },
-                set: { settingsManager.setCallNotifications($0) }
-            ))
-            
-            Toggle("Translation Notifications", isOn: Binding(
-                get: { settingsManager.settings.notifications.translations },
-                set: { settingsManager.setTranslationNotifications($0) }
-            ))
-            
-            Toggle("Push Notifications", isOn: Binding(
-                get: { settingsManager.settings.notifications.push },
-                set: { settingsManager.setPushNotifications($0) }
-            ))
-        } header: {
-            Text("Notifications")
-        }
-    }
-    
-    // MARK: - Privacy Section
-    private var privacySection: some View {
-        Section {
-            Toggle("Show Online Status", isOn: Binding(
-                get: { settingsManager.settings.privacy.showOnlineStatus },
-                set: { settingsManager.settings.privacy.showOnlineStatus = $0; settingsManager.saveSettings() }
-            ))
-            
-            Toggle("Allow Calls", isOn: Binding(
-                get: { settingsManager.settings.privacy.allowCalls },
-                set: { settingsManager.settings.privacy.allowCalls = $0; settingsManager.saveSettings() }
-            ))
-            
-            Toggle("Allow Messages", isOn: Binding(
-                get: { settingsManager.settings.privacy.allowMessages },
-                set: { settingsManager.settings.privacy.allowMessages = $0; settingsManager.saveSettings() }
-            ))
-            
-            Toggle("Share Location", isOn: Binding(
-                get: { settingsManager.settings.privacy.shareLocation },
-                set: { settingsManager.settings.privacy.shareLocation = $0; settingsManager.saveSettings() }
-            ))
-        } header: {
-            Text("Privacy")
         }
     }
     
@@ -518,81 +160,11 @@ struct ComprehensiveSettingsView: View {
                 }
             }
             .padding(.vertical, 8)
-            
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Call Interface")
-                    .font(.headline)
-                    .foregroundColor(.primary)
-                
-                Toggle("Show Waveform", isOn: Binding(
-                    get: { settingsManager.settings.callInterface.showWaveform },
-                    set: { settingsManager.settings.callInterface.showWaveform = $0; settingsManager.saveSettings() }
-                ))
-            }
-            .padding(.vertical, 8)
         } header: {
             Text("Chat & Call")
         }
     }
     
-    // MARK: - Data Management Section
-    private var dataManagementSection: some View {
-        Section {
-            Button("Export Settings") {
-                showExportSettings = true
-            }
-            .foregroundColor(.blue)
-            
-            Button("Import Settings") {
-                showImportSettings = true
-            }
-            .foregroundColor(.blue)
-            
-            Button("Reset to Defaults") {
-                settingsManager.resetToDefaults()
-            }
-            .foregroundColor(.orange)
-        } header: {
-            Text("Data Management")
-        }
-    }
-    
-    // MARK: - Legal Section
-    private var legalSection: some View {
-        Section {
-            Link("Privacy Policy", destination: LegalURLs.privacy)
-            Link("Terms of Service", destination: LegalURLs.terms)
-            Link("Support", destination: LegalURLs.support)
-        } header: {
-            Text("Legal")
-        }
-    }
-
-    // MARK: - Account Section
-    private var accountSection: some View {
-        Section {
-            Button(role: .destructive) {
-                showSignOutAlert = true
-            } label: {
-                Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
-            }
-        } header: {
-            Text("Account")
-        }
-    }
-    
-    // Delete Account gets its own section, in system red, with a plain-language footer.
-    private var deleteAccountSection: some View {
-        Section {
-            Button(role: .destructive) {
-                showDeleteAccountAlert = true
-            } label: {
-                Label("Delete Account", systemImage: "trash.fill")
-            }
-        } footer: {
-            Text("Permanently deletes your account and all of your data. This cannot be undone.")
-        }
-    }
 }
 
 // MARK: - Theme Preview Card
@@ -636,10 +208,8 @@ struct ThemePreviewCard: View {
     }
 }
 
-struct ComprehensiveSettingsView_Previews: PreviewProvider {
+struct ChatStyleSettingsView_Previews: PreviewProvider {
     static var previews: some View {
-        ComprehensiveSettingsView()
-            .environmentObject(SettingsManager.shared)
-            .environmentObject(AuthManager.shared)
+        ChatStyleSettingsView()
     }
 }

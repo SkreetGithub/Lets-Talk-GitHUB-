@@ -46,11 +46,23 @@ struct ComprehensiveChatsView: View {
             }
         }
         // New Chat sheet is presented once, by MainTabView (it owns showNewChat).
+        // Same Settings screen as More › Settings (there used to be two different ones).
         .sheet(isPresented: $showSettings) {
-            ComprehensiveSettingsView()
+            UnifiedSettingsView(translationViewModel: UnifiedTranslationViewModel())
+                .environmentObject(settingsManager)
+                .environmentObject(authManager)
         }
-        .sheet(item: $selectedChat) { chat in
+        // Full screen, like a chat opened from Contacts (the chat screen has its own back button).
+        .fullScreenCover(item: $selectedChat) { chat in
             ChatDetailView(chat: chat)
+        }
+        .alert("Chats", isPresented: Binding(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(viewModel.errorMessage ?? "")
         }
         .refreshable {
             await viewModel.refreshChats()
@@ -70,33 +82,33 @@ struct ComprehensiveChatsView: View {
     private var chatsList: some View {
         List {
             ForEach(filteredChats) { chat in
-                ChatRow(chat: chat, settingsManager: settingsManager)
+                ChatRow(chat: chat, title: viewModel.title(for: chat), photoURL: viewModel.photoURL(for: chat))
                     .contentShape(Rectangle())
                     .onTapGesture {
+                        KeyboardDismisser.dismiss()
                         selectedChat = chat
                     }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            viewModel.deleteChat(chat)
+                    // Long-press menu instead of row swipes: horizontal swipes switch tabs.
+                    .contextMenu {
+                        Button {
+                            viewModel.markAsRead(chat)
                         } label: {
-                            Label("Delete", systemImage: "trash")
+                            Label("Mark as Read", systemImage: "checkmark.circle")
                         }
+                        .disabled(chat.unreadCount == 0)
                         
                         Button {
                             viewModel.togglePin(chat)
                         } label: {
-                            Label(chat.isPinned ? "Unpin" : "Pin", 
+                            Label(chat.isPinned ? "Unpin" : "Pin",
                                   systemImage: chat.isPinned ? "pin.slash" : "pin")
                         }
-                        .tint(.orange)
-                    }
-                    .swipeActions(edge: .leading) {
-                        Button {
-                            viewModel.markAsRead(chat)
+                        
+                        Button(role: .destructive) {
+                            viewModel.deleteChat(chat)
                         } label: {
-                            Label("Mark Read", systemImage: "checkmark.circle")
+                            Label("Delete Chat", systemImage: "trash")
                         }
-                        .tint(.blue)
                     }
             }
         }
@@ -118,7 +130,7 @@ struct ComprehensiveChatsView: View {
             return sortedChats
         } else {
             return sortedChats.filter { chat in
-                chat.title.localizedCaseInsensitiveContains(searchText) ||
+                viewModel.title(for: chat).localizedCaseInsensitiveContains(searchText) ||
                 chat.lastMessage?.content.localizedCaseInsensitiveContains(searchText) == true
             }
         }
@@ -127,14 +139,16 @@ struct ComprehensiveChatsView: View {
 
 struct ChatRow: View {
     let chat: Chat
-    let settingsManager: SettingsManager
+    /// The other person's name (chats used to all be titled "Chat").
+    let title: String
+    let photoURL: String?
     
     var body: some View {
         HStack(spacing: 12) {
             // Profile Image
             ProfileImageView(
-                imageURL: chat.imageURL,
-                placeholderText: chat.title.prefix(1).uppercased()
+                imageURL: photoURL ?? chat.imageURL,
+                placeholderText: title.prefix(1).uppercased()
             )
             .frame(width: 50, height: 50)
             .overlay(
@@ -154,7 +168,7 @@ struct ChatRow: View {
             
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(chat.title)
+                    Text(title)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.primary)
                         .lineLimit(1)
@@ -217,72 +231,108 @@ struct EmptyChatsView: View {
 class ComprehensiveChatsViewModel: ObservableObject {
     @Published var chats: [Chat] = []
     @Published var isLoading = false
-    @Published var error: Error?
+    @Published var errorMessage: String?
+    /// Other participants' names and photos, by user ID.
+    @Published private var names: [String: String] = [:]
+    @Published private var photos: [String: String] = [:]
     
     private let databaseManager = DatabaseManager.shared
+    private var cancellables = Set<AnyCancellable>()
+    private var lookedUp: Set<String> = []
     
     func loadChats() {
         guard let userId = AuthManager.shared.currentUserId else { return }
-        
-        isLoading = true
+        if chats.isEmpty { isLoading = true }
+        cancellables.removeAll()   // one poller at a time (each onAppear used to add another)
         
         databaseManager.listenForChats(userId: userId)
             .receive(on: DispatchQueue.main)
             .sink(
-                receiveCompletion: { [weak self] completion in
+                receiveCompletion: { [weak self] _ in
                     self?.isLoading = false
-                    if case .failure(let error) = completion {
-                        self?.error = error
-                    }
                 },
                 receiveValue: { [weak self] chats in
-                    self?.chats = chats
-                    self?.isLoading = false
+                    guard let self else { return }
+                    self.chats = chats
+                    self.isLoading = false
+                    self.lookUpNames(for: chats)
                 }
             )
             .store(in: &cancellables)
     }
     
     func refreshChats() async {
-        // Refresh is handled by the real-time listener
-        // This method exists for compatibility with refreshable modifier
+        // The list polls every few seconds; pull-to-refresh just restarts it immediately.
+        await MainActor.run { loadChats() }
+    }
+    
+    func otherUserId(in chat: Chat) -> String? {
+        let me = AuthManager.shared.currentUserId?.lowercased()
+        return chat.participants.first { $0.lowercased() != me }
+    }
+    
+    func title(for chat: Chat) -> String {
+        guard let other = otherUserId(in: chat) else { return "Chat" }
+        if let name = names[other], !name.isEmpty { return name }
+        if let contact = ContactManager.shared.contacts.first(where: { $0.userId?.lowercased() == other.lowercased() }) {
+            return contact.name
+        }
+        return "Let Talk User"
+    }
+    
+    func photoURL(for chat: Chat) -> String? {
+        otherUserId(in: chat).flatMap { photos[$0] }
+    }
+    
+    private func lookUpNames(for chats: [Chat]) {
+        let missing = Set(chats.compactMap(otherUserId(in:))).subtracting(lookedUp)
+        guard !missing.isEmpty else { return }
+        lookedUp.formUnion(missing)
+        for userId in missing {
+            Task {
+                guard let user = try? await databaseManager.getUser(id: userId) else { return }
+                await MainActor.run {
+                    self.names[userId] = user.name
+                    if let photo = user.photoURL { self.photos[userId] = photo }
+                }
+            }
+        }
     }
     
     func deleteChat(_ chat: Chat) {
+        chats.removeAll { $0.id == chat.id }
         Task {
             do {
                 try await databaseManager.deleteChat(chat.id)
             } catch {
-                self.error = error
+                await MainActor.run { self.errorMessage = "Couldn't delete the chat. Please try again." }
             }
         }
     }
     
     func togglePin(_ chat: Chat) {
+        let pinned = !chat.isPinned
+        if let index = chats.firstIndex(where: { $0.id == chat.id }) { chats[index].isPinned = pinned }
         Task {
             do {
-                try await databaseManager.pinChat(chat.id)
+                try await databaseManager.setChatPinned(chat.id, pinned: pinned)
             } catch {
-                self.error = error
+                await MainActor.run { self.errorMessage = "Couldn't update the chat. Please try again." }
             }
         }
     }
     
     func markAsRead(_ chat: Chat) {
+        if let index = chats.firstIndex(where: { $0.id == chat.id }) { chats[index].unreadCount = 0 }
         Task {
-            do {
-                try await databaseManager.markChatAsRead(chat.id)
-            } catch {
-                self.error = error
-            }
+            try? await databaseManager.markChatAsRead(chat.id)
         }
     }
     
     func clearChats() {
+        cancellables.removeAll()
         chats.removeAll()
     }
-    
-    private var cancellables = Set<AnyCancellable>()
 }
 
 // ProfileImageView is now defined in UIComponents.swift

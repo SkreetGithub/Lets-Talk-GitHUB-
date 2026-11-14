@@ -181,7 +181,16 @@ final class SettingsManager: ObservableObject {
 
     // MARK: - Privacy Settings
 
+    /// Saves Show Online Status and updates how others see you right away.
+    func setShowOnlineStatus(_ show: Bool) {
+        settings.privacy.showOnlineStatus = show
+        saveSettings()
+        AuthManager.shared.updateOnlineStatus(isOnline: true)   // sends "offline" when hidden
+    }
+
     func updatePrivacySettings(_ privacy: AppSettings.PrivacySettings) {
+        let visibilityChanged = privacy.showOnlineStatus != settings.privacy.showOnlineStatus
+        defer { if visibilityChanged { AuthManager.shared.updateOnlineStatus(isOnline: true) } }
         settings.privacy = privacy
         saveSettings()
     }
@@ -450,6 +459,12 @@ enum TranslationProvider: String, CaseIterable, Codable {
     case google = "google"
     case openAI = "openAI"
     case azure = "azure"
+
+    /// Providers the `translate` server function supports (Azure isn't set up, so it isn't offered).
+    static let available: [TranslationProvider] = [.google, .openAI]
+
+    /// Value for the `translate` function's `provider` field (nil = Google, the default).
+    var backendValue: String? { self == .openAI ? "openai" : nil }
 
     var displayName: String {
         switch self {

@@ -47,8 +47,11 @@ Deno.serve(async (req) => {
 
     const [{ data: sender }, { data: receiver }] = await Promise.all([
       admin.from("profiles").select("name").eq("id", user.id).maybeSingle(),
-      admin.from("profiles").select("language").eq("id", message.receiver_id).maybeSingle(),
+      admin.from("profiles").select("language, settings").eq("id", message.receiver_id).maybeSingle(),
     ]);
+    // The receiver's own Settings: Push Notifications / Message Notifications switched off.
+    const notif = (receiver?.settings as Record<string, any> | null)?.notifications ?? {};
+    if (notif.push === false || notif.messages === false) return json({ sent: false, reason: "muted by receiver" });
     const target = String(receiver?.language || "en").slice(0, 2);
     const body = await notificationBody(message, target);
 

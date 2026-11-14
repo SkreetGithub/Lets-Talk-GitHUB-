@@ -18,7 +18,7 @@ struct MainTabView: View {
     @State private var isTabBarVisible = true
     @State private var lastSelectedTab: Tab = .contacts
     
-    enum Tab: CaseIterable {
+    enum Tab: CaseIterable, Hashable {
         case chats
         case calls
         case contacts
@@ -52,59 +52,53 @@ struct MainTabView: View {
         }
     }
     
+    /// The page the pager is showing. Kept in step with `selectedTab` (tab bar taps scroll the
+    /// pager; swipes update the tab bar).
+    @State private var pagerPosition: Tab?
+    
     var body: some View {
-        NavigationView {
-            ZStack(alignment: .bottom) {
-                // Main Content
-                TabView(selection: $selectedTab) {
-                    // Chats Tab
-                    ComprehensiveChatsView(showNewChat: $showNewChat)
-                        .tag(Tab.chats)
-                        .environmentObject(settingsManager)
-                        .environmentObject(authManager)
-                    
-                    // Calls Tab
-                    CallsView()
-                        .tag(Tab.calls)
-                        .environmentObject(settingsManager)
-                        .environmentObject(authManager)
-                    
-                    // Contacts Tab
-                    ContactsView()
-                        .tag(Tab.contacts)
-                        .environmentObject(settingsManager)
-                        .environmentObject(authManager)
-                    
-                    // Translator Tab
-                    ProfessionalTranslatorView()
-                        .tag(Tab.translator)
-                        .environmentObject(settingsManager)
-                        .environmentObject(authManager)
+        ZStack(alignment: .bottom) {
+            // Swipe between the four tabs with a native paging scroll view (the same UIScrollView
+            // paging iOS uses everywhere): it follows the finger 1:1, settles with the system
+            // spring, and can't get stuck half-way. Every page owns its navigation bar, so the
+            // pager's size never changes mid-swipe (the old shared bar appearing/disappearing
+            // on the Translator page re-laid out the pager while it was moving).
+            ScrollView(.horizontal) {
+                HStack(spacing: 0) {
+                    ForEach(Tab.allCases, id: \.self) { tab in
+                        page(for: tab)
+                            .containerRelativeFrame(.horizontal)
+                            .id(tab)
+                    }
                 }
-                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-                .animation(.easeInOut(duration: 0.3), value: selectedTab)
-                .gesture(swipeGesture)
-                .onChange(of: selectedTab) { oldValue, newTab in
-                    handleTabChange(newTab)
-                }
-                
-                // Custom Tab Bar
-                if isTabBarVisible {
-                    CustomTabBar(
-                        selectedTab: $selectedTab,
-                        showSettings: $showSettings,
-                        showProfile: $showProfile,
-                        showNotifications: $showNotifications
-                    )
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
+                .scrollTargetLayout()
             }
-            // Standard inline title, centered by the system. Chats has its own large-title
-            // NavigationView, so the outer bar hides there instead of stacking two bars.
-            .navigationTitle(selectedTab.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar(selectedTab == .chats ? .hidden : .visible, for: .navigationBar)
-            .animation(DS.screenTransition, value: selectedTab)
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $pagerPosition)
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .onChange(of: pagerPosition) { _, page in
+                // Swiped to a new page: highlight its tab.
+                if let page, page != selectedTab { selectedTab = page }
+            }
+            .onChange(of: selectedTab) { _, newTab in
+                // Tapped a tab: slide the pager there.
+                if pagerPosition != newTab {
+                    withAnimation(.snappy(duration: 0.3)) { pagerPosition = newTab }
+                }
+                handleTabChange(newTab)
+            }
+            
+            // Custom Tab Bar
+            if isTabBarVisible {
+                CustomTabBar(
+                    selectedTab: $selectedTab,
+                    showSettings: $showSettings,
+                    showProfile: $showProfile,
+                    showNotifications: $showNotifications
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .accentColor(.blue)
         .onAppear {
@@ -134,20 +128,51 @@ struct MainTabView: View {
         }
     }
     
-    // MARK: - Tab-Specific Actions
+    // MARK: - Pages
+    @ViewBuilder
+    private func page(for tab: Tab) -> some View {
+        switch tab {
+        case .chats:
+            ComprehensiveChatsView(showNewChat: $showNewChat)
+                .environmentObject(settingsManager)
+                .environmentObject(authManager)
+        case .calls:
+            CallsView()
+                .environmentObject(settingsManager)
+                .environmentObject(authManager)
+        case .contacts:
+            ContactsView()
+                .environmentObject(settingsManager)
+                .environmentObject(authManager)
+        case .translator:
+            // Its own bar, like the other three tabs.
+            NavigationStack {
+                ProfessionalTranslatorView()
+                    .navigationTitle(Tab.translator.title)
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+            .environmentObject(settingsManager)
+            .environmentObject(authManager)
+        }
+    }
+    
     // MARK: - Helper Methods
     private func setupInitialState() {
-        // Set up initial state based on user preferences
+        // Reopen on the last tab used.
         if let lastTab = UserDefaults.standard.string(forKey: "lastSelectedTab"),
            let tab = Tab.allCases.first(where: { $0.title == lastTab }) {
             selectedTab = tab
         }
+        pagerPosition = selectedTab   // jump there without animating across the other pages
     }
     
     private func handleTabChange(_ newTab: Tab) {
         // Save the last selected tab
         UserDefaults.standard.set(newTab.title, forKey: "lastSelectedTab")
         lastSelectedTab = newTab
+        
+        // A keyboard opened on one tab must not stay up on the next one.
+        KeyboardDismisser.dismiss()
         
         // Add haptic feedback
         let impactFeedback = UIImpactFeedbackGenerator(style: .light)
@@ -170,54 +195,6 @@ struct MainTabView: View {
         }
     }
     
-    // MARK: - Tab Navigation Functions
-    private func switchToNextTab() {
-        withAnimation(.easeInOut(duration: 0.3)) {
-            switch selectedTab {
-            case .chats:
-                selectedTab = .calls
-            case .calls:
-                selectedTab = .contacts
-            case .contacts:
-                selectedTab = .translator
-            case .translator:
-                selectedTab = .chats // Loop back to first tab
-            }
-        }
-    }
-    
-    private func switchToPreviousTab() {
-        withAnimation(.easeInOut(duration: 0.3)) {
-            switch selectedTab {
-            case .chats:
-                selectedTab = .translator // Loop back to last tab
-            case .calls:
-                selectedTab = .chats
-            case .contacts:
-                selectedTab = .calls
-            case .translator:
-                selectedTab = .contacts
-            }
-        }
-    }
-    
-    private var swipeGesture: some Gesture {
-        DragGesture()
-            .onEnded { value in
-                let threshold: CGFloat = 50
-                if value.translation.width > threshold {
-                    // Swipe right - go to previous tab
-                    let impactFeedback = UIImpactFeedbackGenerator(style: .light)
-                    impactFeedback.impactOccurred()
-                    switchToPreviousTab()
-                } else if value.translation.width < -threshold {
-                    // Swipe left - go to next tab
-                    let impactFeedback = UIImpactFeedbackGenerator(style: .light)
-                    impactFeedback.impactOccurred()
-                    switchToNextTab()
-                }
-            }
-    }
 }
 
 struct CustomTabBar: View {
@@ -230,17 +207,8 @@ struct CustomTabBar: View {
     
     var body: some View {
         VStack(spacing: 8) {
-            // Page Indicators
-            HStack(spacing: 6) {
-                ForEach(MainTabView.Tab.allCases, id: \.title) { tab in
-                    Circle()
-                        .fill(selectedTab == tab ? tab.color : Color.gray.opacity(0.3))
-                        .frame(width: 6, height: 6)
-                        .scaleEffect(selectedTab == tab ? 1.2 : 1.0)
-                        .animation(.easeInOut(duration: 0.2), value: selectedTab)
-                }
-            }
-            .padding(.top, 8)
+            // (The row of page-indicator dots that sat above the tab bar was removed: the
+            // highlighted tab button already shows which page you're on.)
             
             // Tab Buttons
             HStack(spacing: 0) {
@@ -702,11 +670,20 @@ struct ProfileEditorView: View {
     @State private var isLoading = false
     @State private var showAlert = false
     @State private var alertMessage = ""
+    @State private var showVoiceSettings = false
+    
+    /// e.g. "Male · Voice 3", or "Not set".
+    private var voiceSummary: String {
+        guard let id = authManager.currentUser?.effectiveVoiceId else { return "Not set" }
+        let parts = id.split(separator: "-")
+        guard parts.count == 2 else { return "Not set" }
+        return "\(parts[0].capitalized) · Voice \(parts[1])"
+    }
     
     var body: some View {
         NavigationView {
             Form {
-                Section("Personal Information") {
+                Section {
                     HStack {
                         Image(systemName: "person.fill")
                             .foregroundColor(.blue)
@@ -728,7 +705,33 @@ struct ProfileEditorView: View {
                             .disabled(true)
                             .foregroundColor(.gray)
                     }
+                } header: {
+                    Text("Personal Information")
+                } footer: {
+                    Text("Your email is your sign-in and can't be changed here.")
                 }
+                
+                Section("Voice") {
+                    Button {
+                        showVoiceSettings = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "waveform")
+                                .foregroundColor(.purple)
+                            Text("Voice & Gender")
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Text(voiceSummary)
+                                .foregroundColor(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $showVoiceSettings) {
+                VoiceSettingsView()
             }
             .navigationTitle("Edit Profile")
             .navigationBarTitleDisplayMode(.inline)

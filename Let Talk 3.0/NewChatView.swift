@@ -1,65 +1,66 @@
 import SwiftUI
 
+/// Pick a contact to start (or reopen) a conversation with.
 struct NewChatView: View {
-    @Environment(\.presentationMode) var presentationMode
+    @Environment(\.dismiss) private var dismiss
     @ObservedObject private var contactManager = ContactManager.shared
     @State private var searchText = ""
-    @State private var selectedContacts: Set<Contact> = []
+    @State private var openingContactId: String?
+    @State private var chat: Chat?
+    @State private var errorMessage: String?
     
     var body: some View {
         NavigationView {
-            VStack {
-                // Search bar
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.secondary)
-                    
-                    TextField("Search contacts...", text: $searchText)
-                        .textFieldStyle(PlainTextFieldStyle())
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(.systemGray6))
-                )
-                .padding(.horizontal)
-                
-                // Contact list
-                List {
-                    ForEach(visibleContacts) { contact in
-                        ContactRow(contact: contact)
-                            .onTapGesture {
-                                if selectedContacts.contains(contact) {
-                                    selectedContacts.remove(contact)
-                                } else {
-                                    selectedContacts.insert(contact)
-                                }
+            Group {
+                if contactManager.contacts.isEmpty {
+                    ContentUnavailableView(
+                        "No Contacts Yet",
+                        systemImage: "person.2",
+                        description: Text("Add people in the Contacts tab (tap + there), then start a chat here.")
+                    )
+                } else {
+                    List {
+                        ForEach(visibleContacts) { contact in
+                            Button {
+                                open(contact)
+                            } label: {
+                                ContactRow(contact: contact, isOpening: openingContactId == contact.id)
+                                    .contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain)
+                            .disabled(openingContactId != nil)
+                        }
                     }
+                    .listStyle(.plain)
+                    .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search contacts")
                 }
-                .listStyle(PlainListStyle())
             }
             .navigationTitle("New Chat")
-            .navigationBarItems(
-                leading: Button("Cancel") {
-                    presentationMode.wrappedValue.dismiss()
-                },
-                trailing: Button("Create") {
-                    // Create chat logic
-                    presentationMode.wrappedValue.dismiss()
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
                 }
-                .disabled(selectedContacts.isEmpty)
-            )
+            }
+        }
+        .task { await contactManager.loadContacts() }
+        // Closing the conversation also closes this picker and returns to the chat list.
+        .fullScreenCover(item: $chat, onDismiss: { dismiss() }) { chat in
+            ChatDetailView(chat: chat)
+        }
+        .alert("Can't Start Chat", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage ?? "")
         }
     }
     
     /// The signed-in user's real contacts, filtered by the search box.
     private var visibleContacts: [Contact] {
-        var list = contactManager.contacts
-        #if DEBUG
-        if list.isEmpty { list = Self.previewContacts }
-        #endif
+        let list = contactManager.contacts
         guard !searchText.isEmpty else { return list }
         return list.filter { c in
             c.name.localizedCaseInsensitiveContains(searchText) ||
@@ -67,16 +68,26 @@ struct NewChatView: View {
             c.email.localizedCaseInsensitiveContains(searchText)
         }
     }
-
-    #if DEBUG
-    private static let previewContacts: [Contact] = [
-        Contact(name: "John Doe", phone: "123-456-7890", email: "john@example.com", lastMessage: "Hello!", image: nil),
-        Contact(name: "Jane Smith", phone: "098-765-4321", email: "jane@example.com", lastMessage: "How are you?", image: nil)
-    ]
-    #endif
+    
+    private func open(_ contact: Contact) {
+        KeyboardDismisser.dismiss()
+        openingContactId = contact.id
+        Task {
+            do {
+                let opened = try await DatabaseManager.shared.openChat(with: contact)
+                await MainActor.run {
+                    openingContactId = nil
+                    chat = opened
+                }
+            } catch {
+                await MainActor.run {
+                    openingContactId = nil
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
 }
-
-// ContactRow is defined in ContactsView.swift
 
 #Preview {
     NewChatView()

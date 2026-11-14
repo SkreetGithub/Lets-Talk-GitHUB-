@@ -89,7 +89,7 @@ final class WebRTCCallManager: NSObject, ObservableObject {
             isSpeakerEnabled = isVideo          // video calls default to speaker, voice to earpiece
             callStatus = .initiating
         }
-        configureAudioSession(speaker: isVideo)
+        configureAudioSession(speaker: isVideo || SettingsManager.shared.settings.audio.speakerMode)
         let configuration = await STUNTurnConfiguration.shared.makeConfiguration()
 
         do {
@@ -137,7 +137,7 @@ final class WebRTCCallManager: NSObject, ObservableObject {
                                    status: .answered, createdAt: Date(), participants: [me])
             }
         }
-        configureAudioSession(speaker: isVideo)
+        configureAudioSession(speaker: isVideo || SettingsManager.shared.settings.audio.speakerMode)
         let configuration = await STUNTurnConfiguration.shared.makeConfiguration()
 
         // Peer connection first, so the caller's offer (already in call_signals) can be applied

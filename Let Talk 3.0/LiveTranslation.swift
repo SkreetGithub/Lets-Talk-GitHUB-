@@ -205,6 +205,8 @@ final class LiveTranslationSession: ObservableObject {
     /// (Google WaveNet via `speak`). Falls back to the iPhone's voice if they have no voice
     /// set or the server can't be reached, so a translation is never silently dropped.
     private func speak(_ text: String, voiceId: String?) {
+        // Settings › Speak Translations in Calls off: captions only.
+        guard SettingsManager.shared.settings.translation.voiceEnabled else { return }
         guard let voiceId else {
             speakWithDeviceVoice(text)
             return

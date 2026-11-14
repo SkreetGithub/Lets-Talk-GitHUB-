@@ -9,35 +9,42 @@ struct CallsView: View {
     @State private var showCallDetails = false
     
     var body: some View {
-        ZStack {
-            if viewModel.isLoading {
-                ProgressView()
-            } else if viewModel.calls.isEmpty {
-                EmptyCallsView()
-            } else {
-                callsList
-            }
+        // Own navigation bar so the search field sits at the top under the title (see ContactsView).
+        NavigationStack {
+            ZStack {
+                if viewModel.isLoading {
+                    ProgressView()
+                } else if viewModel.calls.isEmpty {
+                    EmptyCallsView()
+                } else {
+                    callsList
+                }
             
-            // Floating Action Button
-            VStack {
-                Spacer()
-                HStack {
+                // Floating Action Button
+                VStack {
                     Spacer()
-                    Button(action: { showDialpad = true }) {
-                        Image(systemName: "phone.circle.fill")
-                            .font(.system(size: 56))
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(.white, .blue)
-                            .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+                    HStack {
+                        Spacer()
+                        Button(action: { showDialpad = true }) {
+                            Image(systemName: "phone.circle.fill")
+                                .font(.system(size: 56))
+                                .symbolRenderingMode(.palette)
+                                .foregroundStyle(.white, .blue)
+                                .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+                        }
+                        .buttonStyle(PressableStyle())
+                        .accessibilityLabel("Open dial pad")
+                        .padding(.trailing, DS.spacingL)          // was flush against the screen edge
+                        .padding(.bottom, DS.floatingTabBarClearance)
                     }
-                    .buttonStyle(PressableStyle())
-                    .accessibilityLabel("Open dial pad")
-                    .padding(.trailing, DS.spacingL)          // was flush against the screen edge
-                    .padding(.bottom, DS.floatingTabBarClearance)
                 }
             }
+            .navigationTitle("Calls")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText,
+                        placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "Search calls")
         }
-        .searchable(text: $searchText, prompt: "Search calls")
         .sheet(isPresented: $showDialpad) {
             EnhancedDialpadView(isPresented: $showDialpad)
         }
@@ -46,6 +53,10 @@ struct CallsView: View {
         }
         .refreshable {
             await viewModel.refreshCalls()
+        }
+        .onAppear {
+            // Show calls made since the tab was last opened.
+            Task { await viewModel.refreshCalls() }
         }
     }
     
@@ -59,20 +70,18 @@ struct CallsView: View {
                             .onTapGesture {
                                 selectedCall = call
                             }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    viewModel.deleteCall(call)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                            .swipeActions(edge: .leading) {
+                            // Long-press menu instead of row swipes: horizontal swipes switch tabs.
+                            .contextMenu {
                                 Button {
                                     viewModel.initiateCall(to: call.contact)
                                 } label: {
                                     Label("Call", systemImage: "phone")
                                 }
-                                .tint(.green)
+                                Button(role: .destructive) {
+                                    viewModel.deleteCall(call)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                     }
                 }
@@ -216,20 +225,26 @@ class CallsViewModel: ObservableObject {
         
         Task {
             do {
-                calls = try await databaseManager.fetchCalls()
-                isLoading = false
+                let loaded = try await databaseManager.fetchCalls()
+                await MainActor.run {
+                    self.calls = loaded
+                    self.isLoading = false
+                }
             } catch {
-                self.error = error
-                isLoading = false
+                await MainActor.run {
+                    self.error = error
+                    self.isLoading = false
+                }
             }
         }
     }
     
     func refreshCalls() async {
         do {
-            calls = try await databaseManager.fetchCalls()
+            let loaded = try await databaseManager.fetchCalls()
+            await MainActor.run { self.calls = loaded }
         } catch {
-            self.error = error
+            await MainActor.run { self.error = error }
         }
     }
     

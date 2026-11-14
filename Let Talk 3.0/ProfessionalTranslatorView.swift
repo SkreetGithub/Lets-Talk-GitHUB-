@@ -16,12 +16,11 @@ struct ProfessionalTranslatorView: View {
     @State private var showCamera = false
     @State private var showDocumentScanner = false
     @State private var showSettings = false
-    @State private var showSignOutAlert = false
     @State private var scannedImage: UIImage?
     @State private var showHistory = false
     @State private var showFavorites = false
-    @State private var showLanguagePresets = false
     @State private var selectedImage: UIImage?
+    @State private var showCameraDenied = false
     
     var body: some View {
         ZStack {
@@ -38,9 +37,9 @@ struct ProfessionalTranslatorView: View {
                         isTranslating: viewModel.isTranslating,
                         sourceLanguage: viewModel.sourceLanguage,
                         targetLanguage: viewModel.targetLanguage,
-                        onHistoryTap: { showHistory = true },
-                        onFavoritesTap: { showFavorites = true },
-                        onSettingsTap: { showSettings = true }
+                        onHistoryTap: { present { showHistory = true } },
+                        onFavoritesTap: { present { showFavorites = true } },
+                        onSettingsTap: { present { showSettings = true } }
                     )
                     
                     // Language Selection Card
@@ -49,11 +48,11 @@ struct ProfessionalTranslatorView: View {
                         targetLanguage: viewModel.targetLanguage,
                         onSourceLanguageTap: {
                             isSelectingSource = true
-                            showLanguageSelector = true
+                            present { showLanguageSelector = true }
                         },
                         onTargetLanguageTap: {
                             isSelectingSource = false
-                            showLanguageSelector = true
+                            present { showLanguageSelector = true }
                         },
                         onSwapLanguages: viewModel.swapLanguages
                     )
@@ -71,10 +70,16 @@ struct ProfessionalTranslatorView: View {
                         isRecording: viewModel.isRecording,
                         isSpeakerOn: viewModel.isSpeakerOn,
                         isProcessingImage: viewModel.isProcessingImage,
-                        onVoiceTap: viewModel.toggleRecording,
-                        onScanTap: { showScanOptions = true },
-                        onPhotoTap: { showImagePicker = true },
-                        onTranslate: viewModel.translate,
+                        onVoiceTap: {
+                            KeyboardDismisser.dismiss()
+                            viewModel.toggleRecording()
+                        },
+                        onScanTap: { present { showScanOptions = true } },
+                        onPhotoTap: { present { showImagePicker = true } },
+                        onTranslate: {
+                            KeyboardDismisser.dismiss()
+                            viewModel.translate()
+                        },
                         onSpeakerTap: viewModel.toggleSpeaker,
                         canTranslate: viewModel.canTranslate,
                         isTranslating: viewModel.isTranslating
@@ -83,22 +88,21 @@ struct ProfessionalTranslatorView: View {
                     // Translation Result Card
                     UnifiedTranslationResultCard(
                         translatedText: viewModel.translatedText,
+                        isFavorite: viewModel.isCurrentTranslationFavorite,
                         onCopy: {
                             UIPasteboard.general.string = viewModel.translatedText
+                            Haptics.success()
                         },
-                        onFavorite: viewModel.addToFavorites,
-                        onShare: {
-                            // Share functionality
-                        }
+                        onFavorite: viewModel.addToFavorites
                     )
                 }
                 .padding(.horizontal, DS.spacingM)
                 .padding(.bottom, 140)   // clears the floating tab bar + page dots so the last card can scroll fully into view
             }
+            .scrollDismissesKeyboard(.interactively)
         }
-        .dismissKeyboardOnTap()
         .sheet(isPresented: $showSettings) {
-            UnifiedSettingsView(translationViewModel: viewModel)
+            TranslatorSettingsView(viewModel: viewModel)
         }
         .sheet(isPresented: $showLanguageSelector) {
             UnifiedLanguageSelectorView(
@@ -108,69 +112,404 @@ struct ProfessionalTranslatorView: View {
                 onLanguageSelected: { _ in }
             )
         }
-        .sheet(isPresented: $showLanguagePresets) {
-            LanguagePresetsView(
-                viewModel: viewModel,
-                isPresented: $showLanguagePresets
-            )
-        }
         .sheet(isPresented: $showDocumentScanner) {
             DocumentScannerView(selectedImage: $scannedImage)
+                .ignoresSafeArea()
+        }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraCaptureView(selectedImage: $scannedImage)
+                .ignoresSafeArea()
         }
         .sheet(isPresented: $showImagePicker) {
             PhotoPicker(selectedImage: $selectedImage)
         }
         .sheet(isPresented: $showHistory) {
-            TranslationHistoryView(translations: viewModel.recentTranslations)
+            TranslatorHistorySheet(viewModel: viewModel)
         }
         .sheet(isPresented: $showFavorites) {
-            TranslationFavoritesView(favorites: viewModel.favoriteTranslations)
+            FavoriteLanguagesView(viewModel: viewModel)
         }
-        .actionSheet(isPresented: $showScanOptions) {
-            ActionSheet(
-                title: Text("Scan Options"),
-                message: Text("Choose how to capture text"),
-                buttons: [
-                    .default(Text("Document Scanner")) {
-                        showDocumentScanner = true
-                    },
-                    .default(Text("Camera")) {
-                        showCamera = true
-                    },
-                    .cancel()
-                ]
-            )
-        }
-        .onChange(of: scannedImage) { oldValue, image in
-            if let image = image {
-                viewModel.processImage(image)
-            }
-        }
-        .onChange(of: selectedImage) { oldValue, image in
-            if let image = image {
-                viewModel.processImage(image)
-            }
-        }
-        .alert("Sign Out", isPresented: $showSignOutAlert) {
+        .confirmationDialog("Scan Text", isPresented: $showScanOptions, titleVisibility: .visible) {
+            Button("Scan Document") { openCamera(document: true) }
+            Button("Take Photo") { openCamera(document: false) }
             Button("Cancel", role: .cancel) { }
-            Button("Sign Out", role: .destructive) {
-                Task {
-                    try await authManager.signOut()
+        } message: {
+            Text("Point the camera at printed text. Let Talk reads it and puts it in the box to translate.")
+        }
+        .alert("Camera Access Needed", isPresented: $showCameraDenied) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
                 }
             }
+            Button("Cancel", role: .cancel) { }
         } message: {
-            Text("Are you sure you want to sign out?")
+            Text("Let Talk needs the camera to scan text. Turn on Camera for Let Talk in Settings.")
         }
-        .onChange(of: authManager.isAuthenticated) { oldValue, isAuthenticated in
-            if !isAuthenticated {
-                dismiss()
+        .alert("Translator", isPresented: Binding(
+            get: { !viewModel.errorMessage.isEmpty },
+            set: { if !$0 { viewModel.errorMessage = "" } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(viewModel.errorMessage)
+        }
+        .onChange(of: scannedImage) { _, image in
+            if let image {
+                viewModel.processImage(image)
+                scannedImage = nil
+            }
+        }
+        .onChange(of: selectedImage) { _, image in
+            if let image {
+                viewModel.processImage(image)
+                selectedImage = nil
+            }
+        }
+        .onDisappear {
+            // Leaving the tab: don't keep listening or talking in the background.
+            viewModel.stopRecording()
+            viewModel.stopSpeaking()
+        }
+    }
+    
+    /// Closes the keyboard before opening a sheet, so it doesn't stay stuck behind it.
+    private func present(_ open: () -> Void) {
+        KeyboardDismisser.dismiss()
+        open()
+    }
+    
+    /// Asks for camera permission first (the prompt appears once); explains how to fix a denial.
+    private func openCamera(document: Bool) {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            viewModel.errorMessage = "This device has no camera available."
+            return
+        }
+        let start = {
+            if document && VNDocumentCameraViewController.isSupported {
+                showDocumentScanner = true
+            } else {
+                showCamera = true
+            }
+        }
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            start()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    if granted { start() } else { showCameraDenied = true }
+                }
+            }
+        default:
+            showCameraDenied = true
+        }
+    }
+}
+
+// MARK: - Favorite Languages (heart)
+
+/// The five languages used most, plus saved translations. Tap a language to translate into it.
+struct FavoriteLanguagesView: View {
+    @ObservedObject var viewModel: UnifiedTranslationViewModel
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationView {
+            List {
+                Section {
+                    ForEach(Array(viewModel.topLanguages.enumerated()), id: \.element.code) { index, language in
+                        Button {
+                            viewModel.useLanguage(language)
+                            Haptics.tap()
+                            dismiss()
+                        } label: {
+                            HStack(spacing: DS.spacingM) {
+                                Text("\(index + 1)")
+                                    .font(.headline.monospacedDigit())
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 20)
+                                FlagView(flag: language.flag, height: 22)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(language.name)
+                                        .foregroundColor(.primary)
+                                    Text(usageText(for: language))
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                if language.code == viewModel.targetLanguage.code {
+                                    Text("Current")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } header: {
+                    Text("Top 5 Languages")
+                } footer: {
+                    Text("Based on the languages you translate with most. Tap one to translate into it.")
+                }
+                
+                Section("Saved Translations") {
+                    if viewModel.favoriteTranslations.isEmpty {
+                        Text("Tap the heart on a translation to save it here.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(viewModel.favoriteTranslations) { translation in
+                            Button {
+                                viewModel.restore(translation)
+                                dismiss()
+                            } label: {
+                                TranslationRow(translation: translation)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .onDelete { offsets in
+                            offsets.map { viewModel.favoriteTranslations[$0] }.forEach(viewModel.removeFromFavorites)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Favorites")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
             }
         }
     }
     
-    // MARK: - Helper Methods
-    private func dismiss() {
-        // Dismiss implementation
+    private func usageText(for language: UnifiedTranslationLanguage) -> String {
+        let count = viewModel.usageCount(for: language)
+        return count == 0 ? "Suggested" : "Used in your translations"
+    }
+}
+
+// MARK: - Translator Settings (gear)
+
+struct TranslatorSettingsView: View {
+    @ObservedObject var viewModel: UnifiedTranslationViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var pickingSource = false
+    @State private var pickingTarget = false
+    @State private var showVoiceSettings = false
+    @State private var confirmClearHistory = false
+    
+    var body: some View {
+        NavigationView {
+            List {
+                Section("Default Languages") {
+                    languageRow(title: "Translate From", language: viewModel.sourceLanguage) { pickingSource = true }
+                    languageRow(title: "Translate To", language: viewModel.targetLanguage) { pickingTarget = true }
+                    Button {
+                        viewModel.swapLanguages()
+                    } label: {
+                        Label("Swap Languages", systemImage: "arrow.left.arrow.right")
+                    }
+                }
+                
+                Section {
+                    ForEach(viewModel.languagePresets) { preset in
+                        Button {
+                            viewModel.applyPreset(preset)
+                            Haptics.tap()
+                        } label: {
+                            HStack {
+                                FlagView(flag: preset.sourceLanguage.flag, height: 18)
+                                Image(systemName: "arrow.right")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                FlagView(flag: preset.targetLanguage.flag, height: 18)
+                                Text(preset.name)
+                                    .foregroundColor(.primary)
+                                Spacer()
+                                if preset.sourceLanguage.code == viewModel.sourceLanguage.code &&
+                                    preset.targetLanguage.code == viewModel.targetLanguage.code {
+                                    Image(systemName: "checkmark")
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                        }
+                    }
+                    .onDelete { offsets in
+                        offsets.map { viewModel.languagePresets[$0] }.forEach(viewModel.removePreset)
+                    }
+                    Button {
+                        let name = "\(viewModel.sourceLanguage.name) → \(viewModel.targetLanguage.name)"
+                        guard !viewModel.languagePresets.contains(where: { $0.name == name }) else { return }
+                        viewModel.addPreset(name: name, sourceLanguage: viewModel.sourceLanguage, targetLanguage: viewModel.targetLanguage)
+                    } label: {
+                        Label("Save Current Pair", systemImage: "plus.circle")
+                    }
+                } header: {
+                    Text("Quick Pairs")
+                } footer: {
+                    Text("Tap a pair to use it. Swipe left to remove one.")
+                }
+                
+                Section {
+                    Toggle("Speak Translations Automatically", isOn: $viewModel.autoSpeak)
+                    Button {
+                        showVoiceSettings = true
+                    } label: {
+                        Label("Voice", systemImage: "person.wave.2")
+                    }
+                } header: {
+                    Text("Speech")
+                } footer: {
+                    Text("Translations are read aloud in your Let Talk voice.")
+                }
+                
+                Section {
+                    Button("Clear Translation History", role: .destructive) {
+                        confirmClearHistory = true
+                    }
+                    .disabled(viewModel.recentTranslations.isEmpty)
+                }
+            }
+            .navigationTitle("Translator Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $pickingSource) {
+                UnifiedLanguageSelectorView(selectedLanguage: $viewModel.sourceLanguage, isPresented: $pickingSource,
+                                            isSourceLanguage: true, onLanguageSelected: { _ in })
+            }
+            .sheet(isPresented: $pickingTarget) {
+                UnifiedLanguageSelectorView(selectedLanguage: $viewModel.targetLanguage, isPresented: $pickingTarget,
+                                            isSourceLanguage: false, onLanguageSelected: { _ in })
+            }
+            .sheet(isPresented: $showVoiceSettings) {
+                VoiceSettingsView()
+            }
+            .confirmationDialog("Clear all translation history?", isPresented: $confirmClearHistory, titleVisibility: .visible) {
+                Button("Clear History", role: .destructive) { viewModel.clearHistory() }
+            }
+        }
+    }
+    
+    private func languageRow(title: String, language: UnifiedTranslationLanguage, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(title)
+                    .foregroundColor(.primary)
+                Spacer()
+                FlagView(flag: language.flag, height: 18)
+                Text(language.name)
+                    .foregroundColor(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+}
+
+// MARK: - History (clock)
+
+struct TranslatorHistorySheet: View {
+    @ObservedObject var viewModel: UnifiedTranslationViewModel
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationView {
+            Group {
+                if viewModel.recentTranslations.isEmpty {
+                    ContentUnavailableView("No Translations Yet", systemImage: "clock.arrow.circlepath",
+                                           description: Text("Your translations will appear here."))
+                } else {
+                    List {
+                        ForEach(viewModel.recentTranslations) { translation in
+                            Button {
+                                viewModel.restore(translation)
+                                dismiss()
+                            } label: {
+                                TranslationRow(translation: translation)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("History")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Clear", role: .destructive) { viewModel.clearHistory() }
+                        .disabled(viewModel.recentTranslations.isEmpty)
+                }
+            }
+        }
+    }
+}
+
+/// One past or saved translation in a list.
+struct TranslationRow: View {
+    let translation: UnifiedTranslationHistory
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(translation.sourceText)
+                .font(.body)
+                .foregroundColor(.primary)
+                .lineLimit(3)
+            Text(translation.translatedText)
+                .font(.body)
+                .foregroundColor(.secondary)
+                .lineLimit(3)
+            HStack {
+                Text("\(translation.sourceLanguage.code.uppercased()) → \(translation.targetLanguage.code.uppercased())")
+                Spacer()
+                Text(translation.timestamp, style: .relative)
+            }
+            .font(.caption)
+            .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+}
+
+// MARK: - Camera (Take Photo)
+struct CameraCaptureView: UIViewControllerRepresentable {
+    @Binding var selectedImage: UIImage?
+    @Environment(\.dismiss) private var dismiss
+    
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        return picker
+    }
+    
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+    
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let parent: CameraCaptureView
+        init(_ parent: CameraCaptureView) { self.parent = parent }
+        
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            parent.selectedImage = info[.originalImage] as? UIImage
+            parent.dismiss()
+        }
+        
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.dismiss()
+        }
     }
 }
 

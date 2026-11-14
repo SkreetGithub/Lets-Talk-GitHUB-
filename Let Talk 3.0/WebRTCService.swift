@@ -192,7 +192,7 @@ class WebRTCService: NSObject {
                 return
             }
             currentCaptureDevice = backDevice
-            guard let format = RTCCameraVideoCapturer.supportedFormats(for: backDevice).first else { 
+            guard let format = Self.preferredFormat(for: backDevice) else { 
                 debugLog("No supported formats for back camera")
                 return 
             }
@@ -204,7 +204,7 @@ class WebRTCService: NSObject {
         let formats = RTCCameraVideoCapturer.supportedFormats(for: device)
         debugLog("Available formats for front camera: \(formats.count)")
         
-        guard let format = formats.first else { 
+        guard !formats.isEmpty, let format = Self.preferredFormat(for: device) else { 
             debugLog("No supported formats for front camera")
             return 
         }
@@ -247,6 +247,24 @@ class WebRTCService: NSObject {
                     try? await self?.signalingService.sendOffer(callId: self?.currentCallId ?? "", offer: sdp)
                 }
             }
+        }
+    }
+    
+    /// Camera format closest to Settings › Video Quality. (`.first` was used before, which is the
+    /// smallest format the camera offers, so video was always low-resolution.)
+    static func preferredFormat(for device: AVCaptureDevice) -> AVCaptureDevice.Format? {
+        let formats = RTCCameraVideoCapturer.supportedFormats(for: device)
+        let targetHeight: Int32
+        switch SettingsManager.shared.settings.video.quality {
+        case .low: targetHeight = 240
+        case .medium: targetHeight = 480
+        case .high: targetHeight = 720
+        case .ultra: targetHeight = 1080
+        }
+        return formats.min { a, b in
+            let ha = CMVideoFormatDescriptionGetDimensions(a.formatDescription).height
+            let hb = CMVideoFormatDescriptionGetDimensions(b.formatDescription).height
+            return abs(ha - targetHeight) < abs(hb - targetHeight)
         }
     }
     
@@ -319,7 +337,7 @@ class WebRTCService: NSObject {
         }) else { return }
         
         currentCaptureDevice = device
-        guard let format = RTCCameraVideoCapturer.supportedFormats(for: device).first else { return }
+        guard let format = Self.preferredFormat(for: device) else { return }
         
         capturer.stopCapture {
             capturer.startCapture(with: device,

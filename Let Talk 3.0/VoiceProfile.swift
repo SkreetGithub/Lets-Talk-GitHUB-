@@ -78,6 +78,7 @@ final class TranslatedVoicePlayer: NSObject, AVAudioPlayerDelegate {
         }
         let next = try AVAudioPlayer(data: audio)
         next.delegate = self
+        next.volume = Float(SettingsManager.shared.settings.audio.volume)   // Settings › Volume
         next.prepareToPlay()
         next.play()
         player = next
@@ -126,7 +127,7 @@ struct VoiceSettingsView: View {
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
                 } footer: {
-                    Text("People you call hear your translated speech in this voice, in their own language. Previews play in \(language.name).")
+                    Text("People you call hear your translated speech in this voice, in their own language. Previews play in \(previewLanguage == "en" && language.code != "en" ? "English (voices for \(language.name) aren't available yet)" : language.name).")
                 }
 
                 if authManager.currentUser?.effectiveVoiceId == nil {
@@ -231,22 +232,33 @@ struct VoiceSettingsView: View {
         return "Natural"
     }
 
+    /// Language the voice list and previews use. Falls back to English when the voice service
+    /// doesn't cover the user's language (a voice ID works in every language, so the pick still applies).
+    @State private var previewLanguage: String?
+    
     private func load() async {
         isLoading = true
         loadError = nil
+        previewLanguage = nil
         do {
             slots = try await Backend.voices(language: language.code).voices
-            if slots.isEmpty { loadError = "No voices are available for \(language.name) yet." }
+            previewLanguage = language.code
+        } catch BackendError.http(let status) where status == 400 {
+            // Language not supported by the voice service: show the English voices instead.
+            slots = (try? await Backend.voices(language: "en").voices) ?? []
+            previewLanguage = slots.isEmpty ? nil : "en"
         } catch {
-            loadError = "Couldn't load voices. Check your connection and try again."
+            slots = []
         }
+        if slots.isEmpty { loadError = "Couldn't load voices. Check your connection." }
         isLoading = false
     }
 
     private func preview(_ slot: Backend.VoiceSlot) async {
         guard previewing == nil else { return }
         errorMessage = nil
-        let key = "\(language.code)|\(slot.id)"
+        let code = previewLanguage ?? language.code
+        let key = "\(code)|\(slot.id)"
         do {
             if let cached = previewCache[key] {
                 try TranslatedVoicePlayer.shared.playNow(cached)
@@ -254,11 +266,11 @@ struct VoiceSettingsView: View {
             }
             previewing = slot.id
             defer { previewing = nil }
-            let audio = try await Backend.speak(text: Self.sample(for: language.code), voiceId: slot.id, language: language.code)
+            let audio = try await Backend.speak(text: Self.sample(for: code), voiceId: slot.id, language: code)
             previewCache[key] = audio
             try TranslatedVoicePlayer.shared.playNow(audio)
         } catch {
-            errorMessage = "Couldn't play the preview. Please try again."
+            errorMessage = "Couldn't play the preview. Check your connection."
             Haptics.failure()
         }
     }

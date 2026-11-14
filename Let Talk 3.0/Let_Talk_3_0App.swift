@@ -82,12 +82,15 @@ struct Let_Talk_3_0App: App {
                 DynamicIslandViews()
             }
             .preferredColorScheme(preferredColorScheme)
+            // Every scroll view in the app (lists, chats, settings) closes the keyboard when dragged.
+            .scrollDismissesKeyboard(.interactively)
             .sheet(isPresented: $aiConsent.needsPrompt) {
                 AIConsentView()
             }
             .onAppear {
                 startSplashTimer()
                 CallKitManager.shared.registerVoIP()
+                KeyboardDismisser.install()   // tap outside a text field closes the keyboard, app-wide
             }
             // OAuth return (lettalk://auth-callback). The in-app Google sheet normally catches it
             // itself; this covers the case where the system hands the link to the app instead.

@@ -113,31 +113,30 @@ struct EnhancedDialpadView: View {
         }
     }
     
+    /// Your saved contacts, one tap to fill in their number. (Debug builds used to show fake
+    /// "Contact 1…5 / 555-000x" entries here; release builds showed nothing.)
     @ViewBuilder
     private var contactsSearchView: some View {
-        #if DEBUG
-        VStack(spacing: 8) {
-            Text("Recent Contacts")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            
-            // Mock recent contacts - in real app, this would be actual contacts
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(0..<5) { index in
-                        ContactQuickButton(
-                            name: "Contact \(index + 1)",
-                            phone: "555-000\(index + 1)"
-                        ) { contactPhone in
-                            phoneNumber = contactPhone
+        let contacts = Array(ContactManager.shared.contacts.filter { $0.phone.filter(\.isNumber).count >= 7 }.prefix(10))
+        if !contacts.isEmpty {
+            VStack(spacing: 8) {
+                Text("Contacts")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(contacts) { contact in
+                            ContactQuickButton(name: contact.name, phone: contact.phone) { contactPhone in
+                                phoneNumber = contactPhone.filter { $0.isNumber || $0 == "+" }
+                            }
                         }
                     }
+                    .padding(.horizontal, 4)
                 }
-                .padding(.horizontal, 4)
             }
         }
-        #endif
     }
     
     private var dialpadGrid: some View {

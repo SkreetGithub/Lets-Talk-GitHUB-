@@ -7,24 +7,35 @@ struct ContactsView: View {
     @State private var searchText = ""
     @State private var showAddContact = false
     @State private var selectedContact: Contact?
-    @State private var showContactActions = false
-    @State private var showChatView = false
     @State private var selectedChat: Chat?
     
     var body: some View {
-        ZStack {
-            if viewModel.isLoading {
-                ProgressView()
-            } else if viewModel.contacts.isEmpty {
-                EmptyContactsView(showAddContact: $showAddContact)
-            } else {
-                contactsList
+        // Own navigation bar (like Chats) so the search field sits at the top under the title.
+        // On the shared outer bar, iOS 26 put it at the bottom, over the tab bar.
+        NavigationStack {
+            ZStack {
+                if viewModel.isLoading {
+                    ProgressView()
+                } else if viewModel.contacts.isEmpty {
+                    EmptyContactsView(showAddContact: $showAddContact)
+                } else {
+                    contactsList
+                }
+            }
+            .navigationTitle("Contacts")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText,
+                        placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "Search contacts")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: { showAddContact = true }) {
+                        Image(systemName: "person.badge.plus")
+                    }
+                    .accessibilityLabel("Add contact")
+                }
             }
         }
-        .searchable(text: $searchText, prompt: "Search contacts")
-        .navigationBarItems(trailing: Button(action: { showAddContact = true }) {
-            Image(systemName: "person.badge.plus")
-        })
         .sheet(isPresented: $showAddContact) {
             AddContactView()
         }
@@ -39,10 +50,17 @@ struct ContactsView: View {
         } message: {
             Text(viewModel.error?.localizedDescription ?? "An error occurred")
         }
-        .fullScreenCover(isPresented: $showChatView) {
-            if let chat = selectedChat {
-                ChatDetailView(chat: chat)
-            }
+        // `item:` (not isPresented + if-let) so the chat screen always gets its chat.
+        .fullScreenCover(item: $selectedChat) { chat in
+            ChatDetailView(chat: chat)
+        }
+    }
+    
+    /// Tapping a contact opens your conversation with them (like Messages / WhatsApp).
+    private func openChat(with contact: Contact) {
+        KeyboardDismisser.dismiss()
+        viewModel.startChat(with: contact) { chat in
+            if let chat { selectedChat = chat }
         }
     }
     
@@ -51,47 +69,15 @@ struct ContactsView: View {
             ForEach(groupedContacts.keys.sorted(), id: \.self) { key in
                 Section(header: Text(key)) {
                     ForEach(groupedContacts[key] ?? []) { contact in
-                        ContactRow(contact: contact)
+                        ContactRow(contact: contact, isOpening: viewModel.openingContactId == contact.id)
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                selectedContact = contact
+                                openChat(with: contact)
                             }
+                            // Long-press for call, video, details and delete. (Row swipe actions were
+                            // removed: horizontal swipes now switch between the main tabs.)
                             .contextMenu {
                                 contactContextMenu(for: contact)
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    viewModel.deleteContact(contact)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                            .swipeActions(edge: .leading) {
-                                Button {
-                                    viewModel.startChat(with: contact) { chat in
-                                        if let chat = chat {
-                                            selectedChat = chat
-                                            showChatView = true
-                                        }
-                                    }
-                                } label: {
-                                    Label("Message", systemImage: "message")
-                                }
-                                .tint(.blue)
-                                
-                                Button {
-                                    CallCoordinator.shared.startCall(to: contact, isVideo: false)
-                                } label: {
-                                    Label("Call", systemImage: "phone")
-                                }
-                                .tint(.green)
-                                
-                                Button {
-                                    CallCoordinator.shared.startCall(to: contact, isVideo: true)
-                                } label: {
-                                    Label("Video", systemImage: "video")
-                                }
-                                .tint(.purple)
                             }
                     }
                 }
@@ -122,14 +108,15 @@ struct ContactsView: View {
     @ViewBuilder
     private func contactContextMenu(for contact: Contact) -> some View {
         Button {
-            viewModel.startChat(with: contact) { chat in
-                if let chat = chat {
-                    selectedChat = chat
-                    showChatView = true
-                }
-            }
+            openChat(with: contact)
         } label: {
             Label("Message", systemImage: "message")
+        }
+        
+        Button {
+            selectedContact = contact
+        } label: {
+            Label("View Contact", systemImage: "person.crop.circle")
         }
         
         Button {
@@ -160,6 +147,7 @@ struct ContactsView: View {
 
 struct ContactRow: View {
     let contact: Contact
+    var isOpening: Bool = false
     
     var body: some View {
         HStack(spacing: 12) {
@@ -178,7 +166,9 @@ struct ContactRow: View {
             
             Spacer()
             
-            if contact.isOnline {
+            if isOpening {
+                ProgressView()
+            } else if contact.isOnline {
                 Circle()
                     .fill(Color.green)
                     .frame(width: 10, height: 10)
@@ -207,6 +197,8 @@ class ContactsViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: Error?
     @Published var showError = false
+    /// The contact whose chat is being opened (shows a spinner on that row).
+    @Published var openingContactId: String?
     
     private let contactManager = ContactManager.shared
     private var cancellables = Set<AnyCancellable>()
@@ -265,31 +257,19 @@ class ContactsViewModel: ObservableObject {
     }
     
     func startChat(with contact: Contact, completion: @escaping (Chat?) -> Void = { _ in }) {
+        guard openingContactId == nil else { return }   // ignore double taps
+        openingContactId = contact.id
         Task {
             do {
-                // Check if user is authenticated
-                guard let currentUserId = AuthManager.shared.currentUserId, !currentUserId.isEmpty else {
-                    debugLog("Error: User not authenticated or user ID is empty")
-                    await MainActor.run {
-                        self.error = NSError(domain: "ContactsView", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
-                        self.showError = true
-                        completion(nil)
-                    }
-                    return
-                }
-                
-                debugLog("Starting chat with contact: \(contact.name), User ID: \(currentUserId)")
-                
-                let chat = try await DatabaseManager.shared.createOrUpdateChat(
-                    senderId: currentUserId,
-                    receiverId: contact.id
-                )
+                let chat = try await DatabaseManager.shared.openChat(with: contact)
                 await MainActor.run {
+                    self.openingContactId = nil
                     completion(chat)
                 }
             } catch {
-                debugLog("Error creating chat: \(error)")
+                debugLog("Error opening chat: \(error)")
                 await MainActor.run {
+                    self.openingContactId = nil
                     self.error = error
                     self.showError = true
                     completion(nil)
@@ -314,8 +294,6 @@ struct AddContactView: View {
     @State private var phone = ""
     @State private var email = ""
     @State private var selectedCountryCode = "+1"
-    @State private var showPhoneGenerator = false
-    @State private var generatedPhone = ""
     @State private var showQRScanner = false
     @State private var showContactSync = false
     @StateObject private var viewModel = AddContactViewModel()
@@ -358,29 +336,8 @@ struct AddContactView: View {
                     
                     TextField("Email", text: $email)
                         .keyboardType(.emailAddress)
-                }
-                
-                Section("Phone Number Generator") {
-                    Button("Generate Unique Phone Number") {
-                        generatePhoneNumber()
-                    }
-                    .foregroundColor(.blue)
-                    
-                    if !generatedPhone.isEmpty {
-                        HStack {
-                            Text("Generated:")
-                            Spacer()
-                            Text(generatedPhone)
-                                .foregroundColor(.green)
-                                .fontWeight(.semibold)
-                            
-                            Button("Use") {
-                                phone = generatedPhone
-                                generatedPhone = ""
-                            }
-                            .foregroundColor(.blue)
-                        }
-                    }
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
                 }
             }
             .navigationTitle("Add Contact")
@@ -397,32 +354,56 @@ struct AddContactView: View {
                 leading: Button("Cancel") {
                     presentationMode.wrappedValue.dismiss()
                 },
-                trailing: Button("Save") {
-                    let finalPhone = phone.hasPrefix("+") ? phone : "\(selectedCountryCode)\(phone)"
-                    viewModel.addContact(name: name, phone: finalPhone, email: email)
-                    presentationMode.wrappedValue.dismiss()
+                trailing: Group {
+                    if viewModel.isSaving {
+                        ProgressView()
+                    } else {
+                        Button("Save") {
+                            let finalPhone = phone.hasPrefix("+") ? phone : "\(selectedCountryCode)\(phone)"
+                            viewModel.addContact(name: name.trimmingCharacters(in: .whitespaces),
+                                                 phone: finalPhone,
+                                                 email: email.trimmingCharacters(in: .whitespaces)) {
+                                presentationMode.wrappedValue.dismiss()
+                            }
+                        }
+                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || phone.filter(\.isNumber).count < 7)
+                    }
                 }
-                .disabled(name.isEmpty || phone.isEmpty)
             )
+            .alert("Couldn't Save Contact", isPresented: Binding(
+                get: { viewModel.errorMessage != nil },
+                set: { if !$0 { viewModel.errorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(viewModel.errorMessage ?? "")
+            }
         }
-    }
-    
-    private func generatePhoneNumber() {
-        generatedPhone = ContactManager.shared.generatePhoneNumber(for: selectedCountryCode)
     }
 }
 
 class AddContactViewModel: ObservableObject {
     private let contactManager = ContactManager.shared
+    @Published var isSaving = false
+    @Published var errorMessage: String?
     
-    func addContact(name: String, phone: String, email: String) {
+    /// Saves the contact, then calls `onSaved`. Errors are shown instead of silently dropping the contact.
+    func addContact(name: String, phone: String, email: String, onSaved: @escaping () -> Void) {
+        isSaving = true
         Task {
             do {
                 let contact = Contact(name: name, phone: phone, email: email)
                 try await contactManager.addContact(contact)
+                await MainActor.run {
+                    self.isSaving = false
+                    onSaved()
+                }
             } catch {
-                // Handle error
                 debugLog("Error adding contact: \(error)")
+                await MainActor.run {
+                    self.isSaving = false
+                    self.errorMessage = "Check your connection and try again."
+                }
             }
         }
     }
@@ -433,8 +414,9 @@ struct ContactDetailsView: View {
     @Environment(\.presentationMode) var presentationMode
     @State private var showCallOptions = false
     @State private var showCopyAlert = false
-    @State private var showChatView = false
     @State private var selectedChat: Chat?
+    @State private var isOpeningChat = false
+    @State private var chatError: String?
     
     var body: some View {
         NavigationView {
@@ -479,7 +461,11 @@ struct ContactDetailsView: View {
                     // Message Button
                     Button(action: { startChat() }) {
                         HStack {
-                            Image(systemName: "message.fill")
+                            if isOpeningChat {
+                                ProgressView().tint(.white)
+                            } else {
+                                Image(systemName: "message.fill")
+                            }
                             Text("Message")
                         }
                         .font(.headline)
@@ -489,7 +475,23 @@ struct ContactDetailsView: View {
                         .background(Color.blue)
                         .cornerRadius(12)
                     }
+                    .disabled(isOpeningChat)
                     
+                    // Invite (for contacts who aren't on Let Talk yet)
+                    if contact.userId == nil {
+                        ShareLink(item: LetTalkInvite.message(from: AuthManager.shared.currentUser?.name)) {
+                            HStack {
+                                Image(systemName: "paperplane.fill")
+                                Text("Invite to Let Talk")
+                            }
+                            .font(.headline)
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.blue.opacity(0.12))
+                            .cornerRadius(12)
+                        }
+                    }
                 }
                 .padding(.horizontal)
                 
@@ -512,6 +514,18 @@ struct ContactDetailsView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text("Phone number copied to clipboard")
+        }
+        .alert("Can't Open Chat", isPresented: Binding(
+            get: { chatError != nil },
+            set: { if !$0 { chatError = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(chatError ?? "")
+        }
+        // The Message button used to set a flag nothing listened to, so it did nothing.
+        .fullScreenCover(item: $selectedChat) { chat in
+            ChatDetailView(chat: chat)
         }
     }
     
@@ -539,20 +553,21 @@ struct ContactDetailsView: View {
     }
     
     private func startChat() {
+        guard !isOpeningChat else { return }
+        isOpeningChat = true
         Task {
             do {
-                // Create or get existing chat with the contact
-                let chat = try await DatabaseManager.shared.createOrUpdateChat(
-                    senderId: AuthManager.shared.currentUserId ?? "",
-                    receiverId: contact.id
-                )
-                
+                let chat = try await DatabaseManager.shared.openChat(with: contact)
                 await MainActor.run {
-                    self.selectedChat = chat
-                    self.showChatView = true
+                    isOpeningChat = false
+                    selectedChat = chat
                 }
             } catch {
                 debugLog("Error creating chat: \(error)")
+                await MainActor.run {
+                    isOpeningChat = false
+                    chatError = error.localizedDescription
+                }
             }
         }
     }

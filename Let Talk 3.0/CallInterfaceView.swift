@@ -24,8 +24,8 @@ struct CallInterfaceView: View {
     
     var body: some View {
         ZStack {
-            // Background
-            Color.black.ignoresSafeArea()
+            // Background (Settings › Call Interface; "Light" stays dark enough for the white controls)
+            callBackground.ignoresSafeArea()
             
             // Video Views
             videoViews
@@ -326,6 +326,11 @@ struct CallInterfaceView: View {
         }
     }
     
+    private var callBackground: Color {
+        let choice = SettingsManager.shared.settings.callInterface.background
+        return choice == .light ? Color(white: 0.35) : choice.color
+    }
+    
     // MARK: - Methods
     
     private func setupCall() {
@@ -439,7 +444,14 @@ struct LocalVideoView: UIViewRepresentable {
     
     func makeUIView(context: Context) -> RTCMTLVideoView {
         localVideoView.videoContentMode = .scaleAspectFill
+        applyMirror(localVideoView)
         return localVideoView
+    }
+    
+    /// Settings › Mirror Front Camera: show your own preview like a mirror (what others see is unchanged).
+    private func applyMirror(_ view: RTCMTLVideoView) {
+        view.transform = SettingsManager.shared.settings.video.mirrorFrontCamera
+            ? CGAffineTransform(scaleX: -1, y: 1) : .identity
     }
     
     func updateUIView(_ uiView: RTCMTLVideoView, context: Context) {

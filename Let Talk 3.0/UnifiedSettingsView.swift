@@ -20,6 +20,9 @@ struct UnifiedSettingsView: View {
     @State private var showVoiceSettings = false
     @State private var showExportSettings = false
     @State private var showImportSettings = false
+    @State private var showBlockedUsers = false
+    @State private var showPresets = false
+    @State private var showChatStyle = false
     @State private var isResettingPassword = false
     @State private var isDeletingAccount = false
     @State private var accountMessage: (title: String, body: String)?
@@ -53,6 +56,7 @@ struct UnifiedSettingsView: View {
                 
                 // Account Section
                 legalSection
+                AboutSection()
                 accountSection
                 deleteAccountSection
             }
@@ -126,6 +130,23 @@ struct UnifiedSettingsView: View {
         .sheet(isPresented: $showImportSettings) {
             ImportSettingsView(translationViewModel: translationViewModel)
         }
+        // These two were attached to the Profile Section, which copies them onto every row,
+        // so Voice Settings and My QR Code failed to open.
+        .sheet(isPresented: $showMyQRCode) {
+            MyQRCodeView()
+        }
+        .sheet(isPresented: $showVoiceSettings) {
+            VoiceSettingsView()
+        }
+        .sheet(isPresented: $showBlockedUsers) {
+            BlockedUsersView()
+        }
+        .sheet(isPresented: $showChatStyle) {
+            ChatStyleSettingsView()
+        }
+        .sheet(isPresented: $showPresets) {
+            LanguagePresetsView(viewModel: translationViewModel, isPresented: $showPresets)
+        }
     }
     
     // MARK: - Profile Section
@@ -175,21 +196,14 @@ struct UnifiedSettingsView: View {
         } header: {
             Text("Profile")
         }
-        .sheet(isPresented: $showMyQRCode) {
-            MyQRCodeView()
-        }
-        .sheet(isPresented: $showVoiceSettings) {
-            VoiceSettingsView()
-        }
     }
     
     // MARK: - Translation Section
     private var translationSection: some View {
         Section {
-            NavigationLink(destination: LanguagePresetsView(
-                viewModel: translationViewModel,
-                isPresented: .constant(false)
-            )) {
+            // A sheet, not a push: this screen has its own navigation bar and Cancel button, which
+            // did nothing when pushed (its isPresented binding was a constant) and stacked two bars.
+            Button(action: { showPresets = true }) {
                 HStack {
                     Image(systemName: "globe")
                         .foregroundColor(.blue)
@@ -198,8 +212,11 @@ struct UnifiedSettingsView: View {
                     Spacer()
                     Text("\(translationViewModel.languagePresets.count)")
                         .foregroundColor(.secondary)
+                    Image(systemName: "chevron.right")
+                        .foregroundColor(.secondary)
                 }
             }
+            .buttonStyle(PlainButtonStyle())
             
             NavigationLink(destination: TranslationHistoryView(
                 translations: translationViewModel.recentTranslations
@@ -250,6 +267,19 @@ struct UnifiedSettingsView: View {
                 }
             }
             .buttonStyle(PlainButtonStyle())
+            
+            Button(action: { showChatStyle = true }) {
+                HStack {
+                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                        .foregroundColor(.blue)
+                        .frame(width: 24)
+                    Text("Chat & Call Style")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .foregroundColor(.secondary)
+                }
+            }
+            .buttonStyle(PlainButtonStyle())
         } header: {
             Text("Appearance")
         }
@@ -272,25 +302,46 @@ struct UnifiedSettingsView: View {
                 }
             }
             .buttonStyle(PlainButtonStyle())
+
             
-            HStack {
-                Image(systemName: "textformat.abc")
-                    .foregroundColor(.orange)
-                    .frame(width: 24)
-                Text("Default Source Language")
-                Spacer()
-                Text(settingsManager.settings.sourceLanguage.uppercased())
-                    .foregroundColor(.secondary)
+            Toggle(isOn: Binding(
+                get: { settingsManager.settings.translation.autoTranslate },
+                set: { settingsManager.setAutoTranslate($0) }
+            )) {
+                HStack {
+                    Image(systemName: "text.bubble.fill")
+                        .foregroundColor(.purple)
+                        .frame(width: 24)
+                    Text("Auto-translate Messages")
+                }
             }
             
-            HStack {
-                Image(systemName: "textformat.abc.dottedunderline")
-                    .foregroundColor(.green)
-                    .frame(width: 24)
-                Text("Default Target Language")
-                Spacer()
-                Text(settingsManager.settings.targetLanguage.uppercased())
-                    .foregroundColor(.secondary)
+            Toggle(isOn: Binding(
+                get: { settingsManager.settings.translation.voiceEnabled },
+                set: { settingsManager.setVoiceEnabled($0) }
+            )) {
+                HStack {
+                    Image(systemName: "speaker.wave.2.bubble.fill")
+                        .foregroundColor(.green)
+                        .frame(width: 24)
+                    Text("Speak Translations in Calls")
+                }
+            }
+            
+            Picker(selection: Binding(
+                get: { settingsManager.settings.translation.provider },
+                set: { settingsManager.setTranslationProvider($0) }
+            )) {
+                ForEach(TranslationProvider.available, id: \.self) { provider in
+                    Text(provider.displayName).tag(provider)
+                }
+            } label: {
+                HStack {
+                    Image(systemName: "globe")
+                        .foregroundColor(.blue)
+                        .frame(width: 24)
+                    Text("Translation Provider")
+                }
             }
         } header: {
             Text("Language & Translation")
@@ -305,7 +356,7 @@ struct UnifiedSettingsView: View {
                     Image(systemName: "speaker.wave.2.fill")
                         .foregroundColor(.blue)
                         .frame(width: 24)
-                    Text("Audio Settings")
+                    Text("Audio & Video")
                     Spacer()
                     Image(systemName: "chevron.right")
                         .foregroundColor(.secondary)
@@ -322,16 +373,7 @@ struct UnifiedSettingsView: View {
                 Text("\(Int(settingsManager.settings.audio.volume * 100))%")
                     .foregroundColor(.secondary)
             }
-            
-            HStack {
-                Image(systemName: "bell.fill")
-                    .foregroundColor(.orange)
-                    .frame(width: 24)
-                Text("Ringtone")
-                Spacer()
-                Text(settingsManager.settings.audio.ringtone.capitalized)
-                    .foregroundColor(.secondary)
-            }
+
         } header: {
             Text("Audio & Video")
         }
@@ -355,7 +397,7 @@ struct UnifiedSettingsView: View {
             
             Toggle(isOn: Binding(
                 get: { settingsManager.settings.notifications.messages },
-                set: { settingsManager.settings.notifications.messages = $0 }
+                set: { settingsManager.setMessageNotifications($0) }
             )) {
                 HStack {
                     Image(systemName: "message.fill")
@@ -367,7 +409,7 @@ struct UnifiedSettingsView: View {
             
             Toggle(isOn: Binding(
                 get: { settingsManager.settings.notifications.calls },
-                set: { settingsManager.settings.notifications.calls = $0 }
+                set: { settingsManager.setCallNotifications($0) }
             )) {
                 HStack {
                     Image(systemName: "phone.fill")
@@ -376,18 +418,9 @@ struct UnifiedSettingsView: View {
                     Text("Call Notifications")
                 }
             }
+
             
-            Toggle(isOn: Binding(
-                get: { settingsManager.settings.notifications.translations },
-                set: { settingsManager.settings.notifications.translations = $0 }
-            )) {
-                HStack {
-                    Image(systemName: "globe")
-                        .foregroundColor(.purple)
-                        .frame(width: 24)
-                    Text("Translation Notifications")
-                }
-            }
+            PushNotificationsToggle()
         } header: {
             Text("Notifications")
         }
@@ -411,7 +444,7 @@ struct UnifiedSettingsView: View {
             
             Toggle(isOn: Binding(
                 get: { settingsManager.settings.privacy.showOnlineStatus },
-                set: { settingsManager.settings.privacy.showOnlineStatus = $0 }
+                set: { settingsManager.setShowOnlineStatus($0) }
             )) {
                 HStack {
                     Image(systemName: "circle.fill")
@@ -423,7 +456,7 @@ struct UnifiedSettingsView: View {
             
             Toggle(isOn: Binding(
                 get: { settingsManager.settings.privacy.allowCalls },
-                set: { settingsManager.settings.privacy.allowCalls = $0 }
+                set: { settingsManager.settings.privacy.allowCalls = $0; settingsManager.saveSettings() }
             )) {
                 HStack {
                     Image(systemName: "phone.fill")
@@ -432,18 +465,22 @@ struct UnifiedSettingsView: View {
                     Text("Allow Incoming Calls")
                 }
             }
+
             
-            Toggle(isOn: Binding(
-                get: { settingsManager.settings.privacy.allowMessages },
-                set: { settingsManager.settings.privacy.allowMessages = $0 }
-            )) {
+            AITranslationConsentToggle()
+            
+            Button(action: { showBlockedUsers = true }) {
                 HStack {
-                    Image(systemName: "message.fill")
-                        .foregroundColor(.orange)
+                    Image(systemName: "hand.raised.fill")
+                        .foregroundColor(.red)
                         .frame(width: 24)
-                    Text("Allow Incoming Messages")
+                    Text("Blocked Users")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .foregroundColor(.secondary)
                 }
             }
+            .buttonStyle(PlainButtonStyle())
         } header: {
             Text("Privacy")
         }
@@ -628,6 +665,11 @@ struct TranslationHistoryView: View {
             }
             .padding(.vertical, 4)
         }
+        .overlay {
+            if translations.isEmpty {
+                ContentUnavailableView("No Translations Yet", systemImage: "clock.arrow.circlepath", description: Text("Your translations will appear here."))
+            }
+        }
         .navigationTitle("Translation History")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -660,6 +702,11 @@ struct TranslationFavoritesView: View {
                 }
             }
             .padding(.vertical, 4)
+        }
+        .overlay {
+            if favorites.isEmpty {
+                ContentUnavailableView("No Favorites Yet", systemImage: "heart", description: Text("Tap the heart on a translation to save it."))
+            }
         }
         .navigationTitle("Favorite Translations")
         .navigationBarTitleDisplayMode(.inline)
@@ -717,27 +764,12 @@ struct LanguageSettingsView: View {
                         }
                     }
                 }
+
                 
-                Section("Translation Languages") {
-                    Text("Default languages for translation")
-                        .font(.headline)
-                    
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("Source Language")
-                            Spacer()
-                            Text(settingsManager.settings.sourceLanguage)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        HStack {
-                            Text("Target Language")
-                            Spacer()
-                            Text(settingsManager.settings.targetLanguage)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 4)
+                Section {
+                    Text("Messages and calls are translated into this language. The Translator tab's From/To languages are set in Translator › ⚙︎.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             }
             .navigationTitle("Language Settings")
@@ -750,6 +782,7 @@ struct LanguageSettingsView: View {
 struct PrivacySettingsView: View {
     @Environment(\.dismiss) var dismiss
     @StateObject private var settingsManager = SettingsManager.shared
+    @State private var showBlockedUsers = false
     
     var body: some View {
         NavigationView {
@@ -772,28 +805,21 @@ struct PrivacySettingsView: View {
                             settingsManager.updatePrivacySettings(privacy)
                         }
                     ))
+
                     
-                    Toggle("Allow Messages", isOn: Binding(
-                        get: { settingsManager.settings.privacy.allowMessages },
-                        set: { value in
-                            var privacy = settingsManager.settings.privacy
-                            privacy.allowMessages = value
-                            settingsManager.updatePrivacySettings(privacy)
-                        }
-                    ))
-                    
-                    Toggle("Share Location", isOn: Binding(
-                        get: { settingsManager.settings.privacy.shareLocation },
-                        set: { value in
-                            var privacy = settingsManager.settings.privacy
-                            privacy.shareLocation = value
-                            settingsManager.updatePrivacySettings(privacy)
-                        }
-                    ))
+                    AITranslationConsentToggle()
+                }
+                
+                Section {
+                    Button {
+                        showBlockedUsers = true
+                    } label: {
+                        Label("Blocked Users", systemImage: "hand.raised")
+                    }
                 }
                 
                 Section("Data & Privacy") {
-                    Text("Your privacy is important to us. These settings control how your information is shared and used within the app.")
+                    Text("Show Online Status controls whether others see you as online. With Allow Incoming Calls off, calls are declined automatically.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -801,6 +827,7 @@ struct PrivacySettingsView: View {
             .navigationTitle("Privacy Settings")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarItems(trailing: Button("Done") { dismiss() })
+            .sheet(isPresented: $showBlockedUsers) { BlockedUsersView() }
         }
     }
 }
@@ -830,28 +857,13 @@ struct NotificationSettingsView: View {
                             settingsManager.updateNotificationSettings(notifications)
                         }
                     ))
+
                     
-                    Toggle("Translation Notifications", isOn: Binding(
-                        get: { settingsManager.settings.notifications.translations },
-                        set: { value in
-                            var notifications = settingsManager.settings.notifications
-                            notifications.translations = value
-                            settingsManager.updateNotificationSettings(notifications)
-                        }
-                    ))
-                    
-                    Toggle("Push Notifications", isOn: Binding(
-                        get: { settingsManager.settings.notifications.push },
-                        set: { value in
-                            var notifications = settingsManager.settings.notifications
-                            notifications.push = value
-                            settingsManager.updateNotificationSettings(notifications)
-                        }
-                    ))
+                    PushNotificationsToggle()
                 }
                 
                 Section("Notification Preferences") {
-                    Text("Customize which notifications you receive to stay informed about your conversations and calls.")
+                    Text("Message and Call Notifications control what this account is sent. Calls still ring while Let Talk is open.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -905,17 +917,25 @@ struct AudioSettingsView: View {
                         }
                     ))
                 }
+
                 
-                Section("Ringtone") {
-                    HStack {
-                        Text("Ringtone")
-                        Spacer()
-                        Text(settingsManager.settings.audio.ringtone)
-                            .foregroundColor(.secondary)
+                Section("Video") {
+                    Picker("Quality", selection: Binding(
+                        get: { settingsManager.settings.video.quality },
+                        set: { settingsManager.setVideoQuality($0) }
+                    )) {
+                        ForEach(VideoQuality.allCases, id: \.self) { quality in
+                            Text(quality.displayName).tag(quality)
+                        }
                     }
+                    
+                    Toggle("Mirror Front Camera", isOn: Binding(
+                        get: { settingsManager.settings.video.mirrorFrontCamera },
+                        set: { settingsManager.setMirrorFrontCamera($0) }
+                    ))
                 }
             }
-            .navigationTitle("Audio Settings")
+            .navigationTitle("Audio & Video")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarItems(trailing: Button("Done") { dismiss() })
         }
@@ -978,7 +998,7 @@ struct DataManagementView: View {
     
     private func clearTranslationData() {
         isClearingData = true
-        translationViewModel.recentTranslations.removeAll()
+        translationViewModel.clearHistory()   // removeAll() alone wasn't saved, so history came back
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             isClearingData = false
         }
@@ -1041,7 +1061,7 @@ struct ExportSettingsView: View {
         let exportObject = [
             "translations": translationViewModel.recentTranslations.map { translation in
                 [
-                    "id": translation.id,
+                    "id": translation.id.uuidString,
                     "sourceText": translation.sourceText,
                     "translatedText": translation.translatedText,
                     "sourceLanguage": translation.sourceLanguage.code,
@@ -1056,7 +1076,7 @@ struct ExportSettingsView: View {
             exportData = jsonData
             showShareSheet = true
         } catch {
-            debugLog("Export failed: \(error)")
+            debugLog("Export failed: \(error)")   // (it always failed before: the UUID id isn't valid JSON)
         }
         
         isExporting = false
@@ -1103,6 +1123,11 @@ struct ImportSettingsView: View {
             .navigationTitle("Import Settings")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarItems(trailing: Button("Done") { dismiss() })
+            .alert("Import", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(importMessage ?? "")
+            }
             .sheet(isPresented: $showDocumentPicker) {
                 SettingsDocumentPicker { url in
                     importTranslations(from: url)
@@ -1111,27 +1136,41 @@ struct ImportSettingsView: View {
         }
     }
     
+    @State private var importMessage: String?
+    
+    /// Reads a file made by Export and adds its translations to History (it used to only log them).
     private func importTranslations(from url: URL) {
         isImporting = true
+        defer { isImporting = false }
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
         
         do {
             let data = try Data(contentsOf: url)
-            let json = try JSONSerialization.jsonObject(with: data, options: [])
-            
-            if let dict = json as? [String: Any],
-               let translations = dict["translations"] as? [[String: Any]] {
-                
-                for translationData in translations {
-                    // Create translation object from imported data
-                    // This would need to be implemented based on your translation model
-                    debugLog("Importing translation: \(translationData)")
-                }
+            guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let rows = dict["translations"] as? [[String: Any]] else {
+                importMessage = "That file isn't a Let Talk translation export."
+                return
             }
+            let formatter = ISO8601DateFormatter()
+            func language(_ code: Any?) -> UnifiedTranslationLanguage? {
+                guard let code = code as? String else { return nil }
+                return UnifiedTranslationLanguage.allLanguages.first { $0.code == code }
+            }
+            let imported: [UnifiedTranslationHistory] = rows.compactMap { row in
+                guard let source = row["sourceText"] as? String,
+                      let translated = row["translatedText"] as? String,
+                      let from = language(row["sourceLanguage"]),
+                      let to = language(row["targetLanguage"]) else { return nil }
+                let date = (row["timestamp"] as? String).flatMap(formatter.date(from:)) ?? Date()
+                return UnifiedTranslationHistory(sourceText: source, translatedText: translated,
+                                                 sourceLanguage: from, targetLanguage: to, timestamp: date)
+            }
+            let added = translationViewModel.importHistory(imported)
+            importMessage = added == 0 ? "No new translations found in that file." : "Imported \(added) translation\(added == 1 ? "" : "s")."
         } catch {
-            debugLog("Import failed: \(error)")
+            importMessage = "Couldn't read that file."
         }
-        
-        isImporting = false
     }
 }
 

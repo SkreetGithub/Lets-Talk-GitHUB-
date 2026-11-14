@@ -54,6 +54,8 @@ final class MessageTranslator: ObservableObject {
 
     /// Translates any incoming text messages that aren't translated into my language yet.
     func translateIncoming(_ messages: [Message], myUserId: String?) {
+        // Settings › Auto-translate off: show messages exactly as they were sent.
+        guard SettingsManager.shared.settings.translation.autoTranslate else { return }
         let target = myLanguage
         let pending = messages.filter { message in
             message.type == .text

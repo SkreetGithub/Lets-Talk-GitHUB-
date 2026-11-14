@@ -288,12 +288,23 @@ private struct LiveQRScanner: UIViewControllerRepresentable {
             isHighlightingEnabled: true
         )
         scanner.delegate = context.coordinator
+        Self.startWhenOnScreen(scanner)
         return scanner
     }
 
     func updateUIViewController(_ scanner: DataScannerViewController, context: Context) {
-        // Start once the view is on screen (starting inside makeUIViewController can fail).
-        if !scanner.isScanning { try? scanner.startScanning() }
+        Self.startWhenOnScreen(scanner)
+    }
+
+    /// startScanning() throws (and the preview stays black) if called before the scanner is on
+    /// screen, and SwiftUI may not call update again. Retry briefly until it is running.
+    private static func startWhenOnScreen(_ scanner: DataScannerViewController, attempt: Int = 0) {
+        guard !scanner.isScanning, attempt < 10 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (attempt == 0 ? 0.05 : 0.3)) {
+            guard !scanner.isScanning else { return }
+            if scanner.view.window != nil, (try? scanner.startScanning()) != nil { return }
+            startWhenOnScreen(scanner, attempt: attempt + 1)
+        }
     }
 
     static func dismantleUIViewController(_ scanner: DataScannerViewController, coordinator: Coordinator) {

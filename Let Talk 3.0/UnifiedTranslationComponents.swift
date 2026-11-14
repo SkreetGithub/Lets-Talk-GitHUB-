@@ -1,19 +1,13 @@
 import SwiftUI
 import PhotosUI
 
-// MARK: - Keyboard Dismissal Modifier
-struct KeyboardDismissalModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .onTapGesture {
-                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-            }
-    }
-}
-
+// MARK: - Keyboard Dismissal
+// Taps outside a text field close the keyboard app-wide (see KeyboardDismisser in
+// Let_Talk_3_0App.swift). This modifier is kept for older call sites; it no longer adds its own
+// tap gesture, which used to compete with the buttons inside the screen.
 extension View {
     func dismissKeyboardOnTap() -> some View {
-        modifier(KeyboardDismissalModifier())
+        self.scrollDismissesKeyboard(.interactively)
     }
 }
 
@@ -386,9 +380,9 @@ struct UnifiedTranslationControlsCard: View {
 // MARK: - Unified Translation Result Card
 struct UnifiedTranslationResultCard: View {
     let translatedText: String
+    let isFavorite: Bool
     let onCopy: () -> Void
     let onFavorite: () -> Void
-    let onShare: () -> Void
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -406,25 +400,31 @@ struct UnifiedTranslationResultCard: View {
                             Image(systemName: "doc.on.doc")
                                 .foregroundColor(.white.opacity(0.8))
                                 .font(.title3)
+                                .frame(width: DS.minTapTarget, height: DS.minTapTarget)
                         }
+                        .accessibilityLabel("Copy translation")
                         
                         Button(action: onFavorite) {
-                            Image(systemName: "heart")
-                                .foregroundColor(.white.opacity(0.8))
+                            Image(systemName: isFavorite ? "heart.fill" : "heart")
+                                .foregroundColor(isFavorite ? .pink : .white.opacity(0.8))
                                 .font(.title3)
+                                .frame(width: DS.minTapTarget, height: DS.minTapTarget)
                         }
+                        .accessibilityLabel(isFavorite ? "Remove from favorites" : "Save to favorites")
                         
-                        Button(action: onShare) {
+                        ShareLink(item: translatedText) {
                             Image(systemName: "square.and.arrow.up")
                                 .foregroundColor(.white.opacity(0.8))
                                 .font(.title3)
+                                .frame(width: DS.minTapTarget, height: DS.minTapTarget)
                         }
+                        .accessibilityLabel("Share translation")
                     }
                 }
             }
             
             ScrollView {
-                Text(translatedText)
+                Text(translatedText.isEmpty ? "Your translation appears here." : translatedText)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
                     .background(
@@ -435,7 +435,8 @@ struct UnifiedTranslationResultCard: View {
                         RoundedRectangle(cornerRadius: 16)
                             .stroke(Color.white.opacity(0.2), lineWidth: 1)
                     )
-                    .foregroundColor(.white)
+                    .foregroundColor(translatedText.isEmpty ? .white.opacity(0.6) : .white)
+                    .textSelection(.enabled)
             }
             .frame(minHeight: 120, maxHeight: 200)
         }

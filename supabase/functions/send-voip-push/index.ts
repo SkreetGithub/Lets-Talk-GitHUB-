@@ -23,6 +23,13 @@ Deno.serve(async (req) => {
     .eq("blocker_id", callee_id).eq("blocked_id", user.id).maybeSingle();
   if (blocked) return new Response(JSON.stringify({ sent: false, reason: "blocked" }), { headers: corsHeaders });
 
+  // The callee's own Settings: Allow Calls / Call Notifications / Push Notifications switched off.
+  const { data: callee } = await admin.from("profiles").select("settings").eq("id", callee_id).maybeSingle();
+  const s = (callee?.settings as Record<string, any> | null) ?? {};
+  if (s.privacy?.allowCalls === false || s.notifications?.calls === false || s.notifications?.push === false) {
+    return new Response(JSON.stringify({ sent: false, reason: "calls muted by callee" }), { headers: corsHeaders });
+  }
+
   const { data: tok } = await admin.from("push_tokens").select("token").eq("user_id", callee_id).eq("kind", "voip").maybeSingle();
   if (!tok) return new Response(JSON.stringify({ sent: false, reason: "no token" }), { headers: corsHeaders });
 

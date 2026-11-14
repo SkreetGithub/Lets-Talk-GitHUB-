@@ -72,7 +72,9 @@ final class DatabaseManager: ObservableObject {
                         let messages = try await self.fetchMessages(chatId: chatId)
                         subject.send(messages)
                     } catch {
-                        subject.send(completion: .failure(error))
+                        // A dropped connection used to END the stream, so the chat stopped updating
+                        // for good. Skip this tick; the next poll tries again.
+                        debugLog("Message poll failed: \(error)")
                     }
                 }
             }
@@ -129,6 +131,21 @@ final class DatabaseManager: ObservableObject {
         )
     }
 
+    /// Opens (creating if needed) the 1:1 chat with a saved contact.
+    /// A contact is an address-book entry, so the person's Let Talk account is found from the
+    /// contact's linked user ID or, failing that, its phone number. (Chats used to be created with
+    /// the contact ROW id, which is nobody's account, so messages never reached anyone.)
+    func openChat(with contact: Contact) async throws -> Chat {
+        guard let me = AuthManager.shared.currentUserId?.lowercased() else { throw ChatError.notSignedIn }
+        var otherUserId = contact.userId?.lowercased()
+        if otherUserId == nil, contact.phone.filter(\.isNumber).count >= 7 {
+            otherUserId = try await findUserId(byPhone: contact.phone)?.lowercased()
+        }
+        guard let otherUserId else { throw ChatError.notOnLetTalk(contact.name) }
+        guard otherUserId != me else { throw ChatError.ownAccount }
+        return try await createOrUpdateChat(senderId: me, receiverId: otherUserId)
+    }
+
     func listenForChats(userId: String) -> AnyPublisher<[Chat], Error> {
         let subject = PassthroughSubject<[Chat], Error>()
 
@@ -142,7 +159,7 @@ final class DatabaseManager: ObservableObject {
                         let chats = try await self.fetchChats(userId: userId)
                         subject.send(chats)
                     } catch {
-                        subject.send(completion: .failure(error))
+                        debugLog("Chat list poll failed: \(error)")   // retried on the next tick
                     }
                 }
             }
@@ -292,9 +309,56 @@ final class DatabaseManager: ObservableObject {
 
     // MARK: - Calls
 
+    /// Recent calls for the Calls tab, newest first. (This used to always return an empty list,
+    /// so call history never showed anything.)
     func fetchCalls() async throws -> [CallRecord] {
-        // TODO: Implement calls table in Supabase.
-        return []
+        guard let me = AuthManager.shared.currentUserId?.lowercased() else { return [] }
+
+        let response = try await client.from("calls")
+            .select("id, caller_id, callee_id, is_video, status, created_at, answered_at, ended_at")
+            .contains("participants", value: [me])
+            .order("created_at", ascending: false)
+            .limit(100)
+            .execute()
+        let rows = try decoder.decode([CallHistoryRow].self, from: response.data)
+
+        // Names: saved contacts first, then the other person's profile.
+        let others = Set(rows.map { $0.callerId.lowercased() == me ? $0.calleeId : $0.callerId })
+        var people: [String: Contact] = [:]
+        let saved = await MainActor.run { ContactManager.shared.contacts }
+        for id in others {
+            if let contact = saved.first(where: { $0.userId?.lowercased() == id.lowercased() }) {
+                people[id] = contact
+            } else if let user = try? await getUser(id: id) {
+                var contact = Contact(id: id, name: user.name, phone: user.phone, email: user.email)
+                contact.userId = id
+                contact.imageURL = user.photoURL
+                people[id] = contact
+            }
+        }
+
+        return rows.map { row in
+            let outgoing = row.callerId.lowercased() == me
+            let otherId = outgoing ? row.calleeId : row.callerId
+            var contact = people[otherId] ?? Contact(id: otherId, name: "Let Talk User", phone: "", email: "")
+            contact.userId = otherId
+            let duration: Int
+            if let answered = row.answeredAt, let ended = row.endedAt {
+                duration = max(0, Int(ended.timeIntervalSince(answered)))
+            } else {
+                duration = 0
+            }
+            let neverAnswered = row.answeredAt == nil && row.status != "initiated" && row.status != "ringing"
+            return CallRecord(
+                id: row.id,
+                contact: contact,
+                type: row.isVideo ? .video : .audio,
+                timestamp: row.createdAt,
+                duration: duration,
+                isMissed: !outgoing && (row.status == "missed" || neverAnswered),
+                direction: outgoing ? .outgoing : .incoming
+            )
+        }
     }
 
     func deleteCall(_ callId: String) async throws {
@@ -314,8 +378,13 @@ final class DatabaseManager: ObservableObject {
     }
 
     func pinChat(_ chatId: String) async throws {
+        try await setChatPinned(chatId, pinned: true)
+    }
+
+    /// Pins or unpins a chat (unpin used to be impossible: the button always pinned).
+    func setChatPinned(_ chatId: String, pinned: Bool) async throws {
         _ = try await client.from("chats")
-            .update(["is_pinned": true])
+            .update(["is_pinned": pinned])
             .eq("id", value: chatId)
             .execute()
     }
@@ -615,6 +684,28 @@ private struct ChatLastMessageRow: Codable {
     }
 }
 
+private struct CallHistoryRow: Decodable {
+    let id: String
+    let callerId: String
+    let calleeId: String
+    let isVideo: Bool
+    let status: String
+    let createdAt: Date
+    let answeredAt: Date?
+    let endedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case callerId = "caller_id"
+        case calleeId = "callee_id"
+        case isVideo = "is_video"
+        case status
+        case createdAt = "created_at"
+        case answeredAt = "answered_at"
+        case endedAt = "ended_at"
+    }
+}
+
 private struct ContactRowData: Codable {
     let id: String
     let name: String
@@ -696,5 +787,24 @@ struct Chat: Identifiable, Codable {
         let timestamp: Date
         let type: Message.MessageType
         var isRead: Bool = false
+    }
+}
+
+/// Why a chat couldn't be opened, in words the user can act on.
+enum ChatError: LocalizedError {
+    case notSignedIn
+    case notOnLetTalk(String)
+    case ownAccount
+
+    var errorDescription: String? {
+        switch self {
+        case .notSignedIn:
+            return "Please sign in again to send messages."
+        case .notOnLetTalk(let name):
+            let who = name.isEmpty ? "This contact" : name
+            return "\(who) isn't on Let Talk yet. Invite them from their contact card so you can chat."
+        case .ownAccount:
+            return "That's your own account. Pick someone else to chat with."
+        }
     }
 }

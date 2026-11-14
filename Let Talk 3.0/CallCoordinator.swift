@@ -124,6 +124,11 @@ final class CallCoordinator: ObservableObject {
         switch status {
         case .incoming:
             guard let call, presentation == nil else { return }
+            // Settings › Allow Calls off: decline without ringing.
+            guard SettingsManager.shared.settings.privacy.allowCalls else {
+                Task { await callManager.rejectCall() }
+                return
+            }
             presentation = Presentation(id: call.id, call: call, isIncoming: true)
             Haptics.warning()
         case .idle:

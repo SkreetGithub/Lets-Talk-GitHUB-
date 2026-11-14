@@ -25,19 +25,37 @@ struct ChatDetailView: View {
         }
         .navigationBarHidden(true)
         .onAppear {
+            KeyboardDismisser.dismiss()   // don't carry a keyboard over from the previous screen
             viewModel.startListening()
         }
         .onDisappear {
             viewModel.stopListening()
+            if viewModel.isRecording { viewModel.stopRecording() }
         }
-        .actionSheet(isPresented: $showAttachmentPicker) {
-            ActionSheet(title: Text("Add Attachment"), buttons: [
-                .default(Text("Photo/Video")) { showImagePicker = true },
-                .default(Text("Document")) { showDocumentPicker = true },
-                .default(Text("Location")) { showLocationPicker = true },
-                .default(Text("Contact")) { showContactPicker = true },
-                .cancel()
-            ])
+        .confirmationDialog("Send", isPresented: $showAttachmentPicker) {
+            Button("Photo") { showImagePicker = true }
+            Button("Document") { showDocumentPicker = true }
+            Button("My Location") { showLocationPicker = true }
+            Button("Contact") { showContactPicker = true }
+            Button("Cancel", role: .cancel) { }
+        }
+        // Picking something now actually sends it (the pickers used to just store the choice).
+        .onChange(of: viewModel.selectedImage) { _, image in
+            if image != nil { viewModel.sendImage() }
+        }
+        .onChange(of: viewModel.selectedDocument) { _, url in
+            if url != nil { viewModel.sendDocument() }
+        }
+        .onChange(of: viewModel.selectedContact) { _, contact in
+            if contact != nil { viewModel.sendContact() }
+        }
+        .alert("Message", isPresented: Binding(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(viewModel.errorMessage ?? "")
         }
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(selectedImage: $viewModel.selectedImage)
@@ -48,7 +66,11 @@ struct ChatDetailView: View {
             }
         }
         .sheet(isPresented: $showLocationPicker) {
-            LocationPicker(selectedLocation: $viewModel.selectedLocation)
+            LocationPicker { coordinate in
+                viewModel.selectedLocation = coordinate
+                viewModel.sendLocation()
+            }
+            .presentationDetents([.medium])
         }
         .sheet(isPresented: $showContactPicker) {
             ContactPicker(selectedContact: $viewModel.selectedContact)
@@ -73,7 +95,7 @@ struct ChatDetailView: View {
                     ForEach(viewModel.messageGroups.keys.sorted(), id: \.self) { date in
                         Section(header: DateHeader(date: date)) {
                             ForEach(viewModel.messageGroups[date] ?? []) { message in
-                                MessageBubble(message: message)
+                                MessageBubble(message: message, onRetry: { viewModel.retry(message) })
                                 .id(message.id)
                             }
                         }
@@ -103,12 +125,16 @@ struct ChatDetailView: View {
     private var messageInputBar: some View {
         MessageInputBar(
             text: $viewModel.messageText,
-            isRecording: $viewModel.isRecording,
+            isRecording: viewModel.isRecording,
             onSend: {
                 viewModel.sendMessage()
                 scrollToBottom = true
             },
-            onAttachment: { showAttachmentPicker = true }
+            onRecordTap: { viewModel.toggleRecording() },
+            onAttachment: {
+                KeyboardDismisser.dismiss()
+                showAttachmentPicker = true
+            }
         )
     }
 }
@@ -182,7 +208,11 @@ struct ChatHeader: View {
 
 struct MessageBubble: View {
     let message: Message
+    var onRetry: (() -> Void)? = nil
     @ObservedObject private var translator = MessageTranslator.shared
+    /// Settings › Chat Bubbles (sent colour, corner radius, font size).
+    @ObservedObject private var settingsManager = SettingsManager.shared
+    private var bubbleStyle: AppSettings.ChatBubbleSettings { settingsManager.settings.chatBubbles }
     @State private var showOriginal = false
     
     var body: some View {
@@ -238,7 +268,7 @@ struct MessageBubble: View {
             .padding(.horizontal, 12)
             .padding(.vertical, DS.spacingS)
             .background(bubbleBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: CGFloat(bubbleStyle.cornerRadius), style: .continuous))
             .contextMenu {
                 messageContextMenu
             }
@@ -265,6 +295,7 @@ struct MessageBubble: View {
         let translated = message.isOutgoing ? nil : translator.translation(for: message)
         return VStack(alignment: .leading, spacing: DS.spacingXS) {
             Text(showOriginal ? message.content : (translated ?? message.content))
+                .font(.system(size: CGFloat(bubbleStyle.fontSize)))
                 .foregroundColor(message.isOutgoing ? .white : .primary)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
@@ -403,7 +434,7 @@ struct MessageBubble: View {
         Group {
             if message.isOutgoing {
                 LinearGradient(
-                    gradient: Gradient(colors: [.blue, .blue.opacity(0.8)]),
+                    gradient: Gradient(colors: [bubbleStyle.sentColor.color, bubbleStyle.sentColor.color.opacity(0.8)]),
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -441,7 +472,11 @@ struct MessageBubble: View {
                 // The old "Translate" item showed fake text ("Translated: …"); incoming messages
                 // are now translated automatically, with Show Original on the bubble.
             }
-            // "Retry" and "Delete" were removed: they had no implementation (tapping did nothing).
+            if message.isOutgoing && message.status == .failed, let onRetry {
+                Button(action: onRetry) {
+                    Label("Send Again", systemImage: "arrow.clockwise")
+                }
+            }
         }
     }
     
@@ -455,8 +490,9 @@ struct MessageBubble: View {
 
 struct MessageInputBar: View {
     @Binding var text: String
-    @Binding var isRecording: Bool
+    let isRecording: Bool
     let onSend: () -> Void
+    let onRecordTap: () -> Void
     let onAttachment: () -> Void
     @FocusState private var isFocused: Bool
     
@@ -483,7 +519,7 @@ struct MessageInputBar: View {
             
             Button(action: {
                 if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    isRecording.toggle()
+                    onRecordTap()   // used to flip a flag only: "Recording..." showed but nothing recorded
                 } else {
                     onSend()
                 }
@@ -501,6 +537,7 @@ struct MessageInputBar: View {
         .padding(.vertical, DS.spacingS)
         .background(.bar)                                 // system blur, like Messages
         .overlay(alignment: .top) { Divider() }
+        .keepsKeyboardOpen()                              // tapping Send doesn't close the keyboard
     }
     
     private var hasText: Bool {
@@ -529,7 +566,7 @@ struct MessageInputBar: View {
         HStack {
             Image(systemName: "waveform")
                 .foregroundColor(.red)
-            Text("Recording...")
+            Text("Recording… tap ■ to send")
                 .foregroundColor(.red)
             Spacer()
         }
@@ -621,38 +658,147 @@ struct ImagePicker: UIViewControllerRepresentable {
 
 // Note: DocumentPicker is defined in OfflineIndicatorView.swift
 
+/// Shares the user's current location (the old screen said "Location Picker" and did nothing).
 struct LocationPicker: View {
-    @Binding var selectedLocation: CLLocationCoordinate2D?
-    @Environment(\.presentationMode) var presentationMode
+    let onSend: (CLLocationCoordinate2D) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var locator = OneShotLocator()
     
     var body: some View {
         NavigationView {
-            VStack {
-                Text("Location Picker")
-                // Implement location picker
+            VStack(spacing: DS.spacingL) {
+                Image(systemName: "location.circle.fill")
+                    .font(.system(size: 56))
+                    .foregroundColor(.blue)
+                Group {
+                    switch locator.state {
+                    case .locating:
+                        HStack(spacing: DS.spacingS) {
+                            ProgressView()
+                            Text("Finding your location…")
+                        }
+                    case .found:
+                        Text("Your current location is ready to send.")
+                    case .denied:
+                        Text("Location access is off for Let Talk. Turn it on in Settings › Let Talk › Location.")
+                    case .failed:
+                        Text("Couldn't find your location. Move somewhere with a clearer view of the sky and try again.")
+                    }
+                }
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                
+                Button {
+                    if let coordinate = locator.coordinate {
+                        onSend(coordinate)
+                        dismiss()
+                    }
+                } label: {
+                    Text("Send My Location")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: DS.primaryButtonHeight)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(locator.coordinate == nil)
+                
+                if locator.state == .denied {
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }
+                }
             }
-            .navigationTitle("Select Location")
-            .navigationBarItems(trailing: Button("Done") {
-                presentationMode.wrappedValue.dismiss()
-            })
+            .padding(DS.spacingL)
+            .navigationTitle("Share Location")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .onAppear { locator.start() }
+    }
+}
+
+/// Asks for "While Using" permission once, then reports a single location fix.
+final class OneShotLocator: NSObject, ObservableObject, CLLocationManagerDelegate {
+    enum State { case locating, found, denied, failed }
+    @Published var state: State = .locating
+    @Published var coordinate: CLLocationCoordinate2D?
+    private let manager = CLLocationManager()
+    
+    override init() {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+    }
+    
+    func start() {
+        switch manager.authorizationStatus {
+        case .notDetermined: manager.requestWhenInUseAuthorization()
+        case .denied, .restricted: state = .denied
+        default: manager.requestLocation()
+        }
+    }
+    
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways: manager.requestLocation()
+        case .denied, .restricted: DispatchQueue.main.async { self.state = .denied }
+        default: break
+        }
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else { return }
+        DispatchQueue.main.async {
+            self.coordinate = location.coordinate
+            self.state = .found
+        }
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        DispatchQueue.main.async {
+            if self.coordinate == nil { self.state = .failed }
         }
     }
 }
 
+/// Pick one of your saved contacts to share in the chat (was a placeholder screen).
 struct ContactPicker: View {
     @Binding var selectedContact: Contact?
-    @Environment(\.presentationMode) var presentationMode
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var contactManager = ContactManager.shared
     
     var body: some View {
         NavigationView {
-            VStack {
-                Text("Contact Picker")
-                // Implement contact picker
+            Group {
+                if contactManager.contacts.isEmpty {
+                    ContentUnavailableView("No Contacts", systemImage: "person.2",
+                                           description: Text("Add contacts in the Contacts tab first."))
+                } else {
+                    List(contactManager.contacts) { contact in
+                        Button {
+                            selectedContact = contact
+                            dismiss()
+                        } label: {
+                            ContactRow(contact: contact)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .listStyle(.plain)
+                }
             }
-            .navigationTitle("Select Contact")
-            .navigationBarItems(trailing: Button("Done") {
-                presentationMode.wrappedValue.dismiss()
-            })
+            .navigationTitle("Share Contact")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
         }
     }
 }
@@ -671,34 +817,81 @@ struct VideoThumbnail: View {
     }
 }
 
+/// Plays a voice message (the old view only drew a play icon).
 struct AudioPlayer: View {
     let url: URL
+    @StateObject private var playback = VoiceMessagePlayback()
     
     var body: some View {
-        HStack {
-            Image(systemName: "play.circle.fill")
-                .font(.system(size: 30))
-            Text("Audio Message")
-            Spacer()
+        Button {
+            playback.toggle(url)
+        } label: {
+            HStack {
+                Image(systemName: playback.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.system(size: 30))
+                Text(playback.isPlaying ? "Playing…" : "Voice Message")
+                Spacer()
+            }
+            .padding()
+            .background(Color.gray.opacity(0.3))
+            .cornerRadius(8)
         }
-        .padding()
-        .background(Color.gray.opacity(0.3))
-        .cornerRadius(8)
+        .buttonStyle(.plain)
+        .accessibilityLabel(playback.isPlaying ? "Pause voice message" : "Play voice message")
+        .onDisappear { playback.stop() }
     }
 }
 
+final class VoiceMessagePlayback: ObservableObject {
+    @Published var isPlaying = false
+    private var player: AVPlayer?
+    private var endObserver: NSObjectProtocol?
+    
+    func toggle(_ url: URL) {
+        if isPlaying { stop(); return }
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+        try? AVAudioSession.sharedInstance().setActive(true)
+        let item = AVPlayerItem(url: url)
+        let player = AVPlayer(playerItem: item)
+        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+            self?.stop()
+        }
+        self.player = player
+        player.play()
+        isPlaying = true
+    }
+    
+    func stop() {
+        player?.pause()
+        player = nil
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        endObserver = nil
+        isPlaying = false
+    }
+}
+
+/// Tap to open the shared location in Apple Maps.
 struct MapThumbnail: View {
     let latitude: Double
     let longitude: Double
     
     var body: some View {
-        VStack {
-            Image(systemName: "map.fill")
-                .font(.system(size: 40))
-            Text("Location")
+        Button {
+            if let url = URL(string: "http://maps.apple.com/?ll=\(latitude),\(longitude)&q=Shared%20Location") {
+                UIApplication.shared.open(url)
+            }
+        } label: {
+            VStack {
+                Image(systemName: "map.fill")
+                    .font(.system(size: 40))
+                Text("Location · Tap to Open")
+                    .font(.caption)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.gray.opacity(0.3))
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.gray.opacity(0.3))
+        .buttonStyle(.plain)
+        .accessibilityLabel("Shared location. Opens in Maps")
     }
 }
 

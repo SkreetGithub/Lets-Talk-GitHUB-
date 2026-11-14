@@ -28,11 +28,15 @@ Deno.serve(async (req) => {
   await run("push_tokens", admin.from("push_tokens").delete().eq("user_id", id));
   await run("call_signals", admin.from("call_signals").delete().eq("sender_id", id));
   await run("reports", admin.from("reports").delete().eq("reporter_id", id));
+  // 1:1 chats this user was in (the chat list rows; their messages are deleted above).
+  await run("chats", admin.from("chats").delete().contains("participants", [id]));
 
   // Storage objects under the user's folder (avatars/attachments), best effort.
   const bucket = Deno.env.get("SUPABASE_STORAGE_BUCKET") ?? "public";
   const { data: files } = await admin.storage.from(bucket).list(id);
   if (files?.length) await admin.storage.from(bucket).remove(files.map((f) => `${id}/${f.name}`));
+  // The app stores the profile photo at profile_images/<id>.jpg (not under the user's folder).
+  await admin.storage.from(bucket).remove([`profile_images/${id}.jpg`]);
 
   await run("profiles", admin.from("profiles").delete().eq("id", id));
   const { error: authErr } = await admin.auth.admin.deleteUser(id);

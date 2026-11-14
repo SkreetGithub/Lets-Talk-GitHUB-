@@ -282,6 +282,8 @@ final class AuthManager: ObservableObject {
 
     func updateOnlineStatus(isOnline: Bool) {
         guard let userId = currentUserId else { return }
+        // Settings › Show Online Status off: always appear offline to others.
+        let isOnline = isOnline && SettingsManager.shared.settings.privacy.showOnlineStatus
 
         Task {
             let update = ProfileUpdate(
