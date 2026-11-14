@@ -750,3 +750,17 @@ body {
         font-size: var(--font-size-sm);
     }
 }
+
+/* Connect + About sections (merged from the v0 site) */
+.features.connect {
+    background: var(--card);
+}
+
+.features.about {
+    background: var(--blue-banana-gradient-vertical);
+}
+
+.features.about .section-title,
+.features.about .section-description {
+    color: #111;
+}
