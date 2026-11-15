@@ -231,16 +231,14 @@ p { text-wrap: pretty; }
 .call-buttons span { width: 4em; height: 4em; border-radius: 50%; background: rgba(255, 255, 255, .14); }
 .call-buttons .end { background: #F0453A; }
 
-.scene-video { color: #fff; background: linear-gradient(160deg, #6FA8E8, #2C4A7A 60%, #1B2740); justify-content: flex-end; padding: 0 1.2em 1.2em; }
+.scene-video { color: #fff; background: #0B0D12; justify-content: flex-end; padding: 0 1.2em 1.2em; }
 .video-person, .video-pip { position: absolute; display: block; }
-.video-person { inset: 0; }
-.video-person i, .video-pip i { position: absolute; left: 50%; border-radius: 50%; translate: -50% 0; background: #F3C9A5; }
-.video-person b, .video-pip b { position: absolute; left: 50%; translate: -50% 0; border-radius: 50% 50% 0 0 / 60% 60% 0 0; background: #FFB700; }
-.video-person i { top: 21%; width: 34%; aspect-ratio: 1; }
-.video-person b { top: 43%; width: 78%; height: 60%; }
-.video-pip { top: 7%; right: 5%; width: 27%; aspect-ratio: 3 / 4; border-radius: 1em; overflow: hidden; background: linear-gradient(160deg, #FFD766, #FF6B35); box-shadow: 0 .4em 1.2em rgba(0, 0, 0, .3); }
-.video-pip i { top: 22%; width: 42%; aspect-ratio: 1; background: #C98E63; }
-.video-pip b { top: 52%; width: 90%; height: 60%; background: #14161C; }
+.video-person { inset: 0; overflow: hidden; }
+.video-person img, .video-pip img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.video-person img { object-position: 50% 28%; }
+/* Darken the top (status/self-view) and bottom (subtitles/buttons) so overlays stay readable. */
+.video-person::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0, 0, 0, .38) 0%, rgba(0, 0, 0, 0) 22%, rgba(0, 0, 0, 0) 52%, rgba(0, 0, 0, .72) 100%); }
+.video-pip { top: 7%; right: 5%; width: 27%; aspect-ratio: 3 / 4; border-radius: 1em; overflow: hidden; background: #1B2740; box-shadow: 0 .4em 1.2em rgba(0, 0, 0, .35), 0 0 0 1px rgba(255, 255, 255, .18); }
 .video-name { position: relative; align-self: flex-start; padding: .3em .8em; border-radius: 99px; background: rgba(0, 0, 0, .35); font-size: .95em; font-weight: 600; }
 .subs { position: relative; margin: .7em 0 1.1em; padding: .85em 1em; border-radius: 1.1em; background: rgba(13, 15, 20, .72); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 .subs small { display: block; font-size: .95em; color: #B5BAC5; }
@@ -298,8 +296,12 @@ p { text-wrap: pretty; }
 .wave { flex: 1; min-width: 0; height: 72px; display: flex; align-items: center; gap: 3px; }
 .wave i { flex: 1; min-width: 2px; height: var(--h); border-radius: 99px; background: linear-gradient(180deg, var(--yellow), var(--orange)); opacity: .45; transform: scaleY(.35); transition: transform .5s var(--ease), opacity .4s; }
 .wave.is-playing i { opacity: 1; animation: wave .9s ease-in-out infinite alternate; animation-delay: calc(var(--d) * -1); }
+.wave.is-live i { opacity: 1; animation: none; transition: transform .09s linear; }
 @keyframes wave { from { transform: scaleY(.25); } to { transform: scaleY(1); } }
 .wave-line { margin-top: 16px; font-weight: 600; }
+.wave-line span { transition: color .3s var(--ease), opacity .3s; }
+.wave-line.is-live span { opacity: .45; }
+.wave-line.is-live span.is-on { opacity: 1; color: var(--yellow); }
 .wave-note { margin-top: 6px; font-size: .85rem; color: #9CA2AE; }
 
 @property --ang { syntax: '<angle>'; initial-value: 0deg; inherits: false; }

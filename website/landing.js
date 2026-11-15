@@ -290,61 +290,91 @@
   }
   wave.innerHTML = bars;
 
-  var synth = window.speechSynthesis, voiceIx = 0, speaking = false, stopTimer = null;
-  function pickVoices(prefix) {
-    var all = synth ? synth.getVoices() : [];
-    return all.filter(function (v) { return v.lang && v.lang.toLowerCase().indexOf(prefix) === 0; });
+  // One sample voice saying the same line in English, then Spanish.
+  var line = $('#wave-line'), parts = line ? $$('span[data-part]', line) : [];
+  var clips = ['/assets/voice-en.mp3', '/assets/voice-es.mp3'];
+  var bars = $$('i', wave), audio = null, ctx = null, analyser = null, freq = null, raf = 0, playing = false, ix = 0;
+
+  function setPart(n) {
+    if (line) line.classList.toggle('is-live', n >= 0);
+    parts.forEach(function (p, k) { p.classList.toggle('is-on', k === n); });
   }
-  if (synth && synth.getVoices) synth.getVoices(); // some browsers load the list lazily
-  function stopSample() {
-    speaking = false;
-    clearTimeout(stopTimer);
-    if (synth) synth.cancel();
-    wave.classList.remove('is-playing');
-    play.classList.remove('is-playing');
-    play.setAttribute('aria-label', 'Play sample');
-  }
-  function say(text, voice, lang, pitch) {
-    return new Promise(function (resolve) {
-      var u = new SpeechSynthesisUtterance(text);
-      if (voice) u.voice = voice;
-      u.lang = voice ? voice.lang : lang;
-      u.pitch = pitch; u.rate = 0.95;
-      u.onend = resolve; u.onerror = resolve;
-      synth.speak(u);
-    });
-  }
-  function playSample() {
-    speaking = true;
-    wave.classList.add('is-playing');
-    play.classList.add('is-playing');
-    play.setAttribute('aria-label', 'Stop sample');
-    if (!synth || typeof SpeechSynthesisUtterance === 'undefined') {
-      waveNote.textContent = "Your browser can't play speech, so this shows the waveform only. Voice cloning isn't available yet.";
-      stopTimer = setTimeout(stopSample, 3200);
+  var liveStart = 0, livePeak = 0;
+  function drawLevels() {
+    if (!analyser) return;
+    analyser.getByteFrequencyData(freq);
+    for (var m = 0; m < freq.length; m++) if (freq[m] > livePeak) livePeak = freq[m];
+    // Some browsers report silence from Web Audio; after half a second with no signal,
+    // fall back to the animated waveform instead of flat bars.
+    if (!livePeak && audio && !audio.paused && liveStart && performance.now() - liveStart > 500) {
+      wave.classList.remove('is-live'); wave.classList.add('is-playing'); resetBars();
       return;
     }
-    var en = pickVoices('en'), es = pickVoices('es');
-    // Voice B: a second voice if the browser has one, otherwise the same voice at a lower pitch.
-    var same = en.length < 2;
-    var enV = en[same ? 0 : voiceIx] || null;
-    var esV = es[es.length > 1 ? voiceIx : 0] || null;
-    var pitch = voiceIx === 1 && same ? 0.7 : 1;
-    stopTimer = setTimeout(stopSample, 12000); // safety net if the browser never reports the end
-    say('Hello, how are you?', enV, 'en-US', pitch)
-      .then(function () { return speaking ? say('Hola, ¿cómo estás?', esV, 'es-ES', pitch) : null; })
-      .then(function () { if (speaking) stopSample(); });
+    for (var k = 0; k < bars.length; k++) {
+      var v = freq[Math.min(freq.length - 1, 2 + Math.floor(k * (freq.length * 0.55) / bars.length))] / 255;
+      bars[k].style.transform = 'scaleY(' + Math.max(0.12, Math.min(1, v * 1.25)).toFixed(3) + ')';
+    }
+    raf = requestAnimationFrame(drawLevels);
   }
-  play.addEventListener('click', function () { speaking ? stopSample() : playSample(); });
-  $$('.seg-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      $$('.seg-btn').forEach(function (x) { x.classList.remove('is-on'); x.setAttribute('aria-pressed', 'false'); });
-      btn.classList.add('is-on'); btn.setAttribute('aria-pressed', 'true');
-      voiceIx = +btn.getAttribute('data-voice');
-      if (speaking) { stopSample(); playSample(); }
+  function resetBars() { bars.forEach(function (bar) { bar.style.transform = ''; }); }
+  function stopSample() {
+    playing = false;
+    cancelAnimationFrame(raf);
+    if (audio) { audio.pause(); audio.currentTime = 0; }
+    wave.classList.remove('is-playing', 'is-live');
+    play.classList.remove('is-playing');
+    play.setAttribute('aria-label', 'Play sample');
+    setPart(-1);
+    resetBars();
+  }
+  function ensureAudio() {
+    if (audio) return;
+    audio = new Audio();
+    audio.preload = 'auto';
+    audio.addEventListener('ended', function () {
+      if (!playing) return;
+      if (ix + 1 < clips.length) { setTimeout(function () { if (playing) playClip(ix + 1); }, 350); }
+      else stopSample();
     });
-  });
-  window.addEventListener('pagehide', function () { if (synth) synth.cancel(); });
+    audio.addEventListener('error', function () {
+      waveNote.textContent = "The sample couldn't load. Voice cloning isn't available yet.";
+      stopSample();
+    });
+    // Live waveform from the real audio, if the browser supports Web Audio.
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) {
+      try {
+        ctx = new AC();
+        var src = ctx.createMediaElementSource(audio);
+        analyser = ctx.createAnalyser();
+        analyser.fftSize = 128;
+        analyser.smoothingTimeConstant = 0.72;
+        freq = new Uint8Array(analyser.frequencyBinCount);
+        src.connect(analyser);
+        analyser.connect(ctx.destination);
+      } catch (e) { analyser = null; }
+    }
+  }
+  function playClip(n) {
+    ix = n;
+    setPart(n);
+    audio.src = clips[n];
+    var p = audio.play();
+    if (p && p.catch) p.catch(function () { stopSample(); });
+  }
+  function playSample() {
+    ensureAudio();
+    if (ctx && ctx.state === 'suspended') ctx.resume();
+    playing = true;
+    play.classList.add('is-playing');
+    play.setAttribute('aria-label', 'Stop sample');
+    // Use the live levels when we have them; otherwise fall back to the CSS animation.
+    wave.classList.add(analyser ? 'is-live' : 'is-playing');
+    if (analyser) { cancelAnimationFrame(raf); livePeak = 0; liveStart = performance.now(); drawLevels(); }
+    playClip(0);
+  }
+  play.addEventListener('click', function () { playing ? stopSample() : playSample(); });
+  window.addEventListener('pagehide', function () { if (playing) stopSample(); });
 
   /* ---------- Sign-up forms (Netlify Forms) ---------- */
   $$('form.signup').forEach(function (form) {
