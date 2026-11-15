@@ -142,7 +142,7 @@ struct MainTabView: View {
                 .environmentObject(settingsManager)
                 .environmentObject(authManager)
         case .calls:
-            CallsView()
+            CallsView(isActive: selectedTab == .calls)
                 .environmentObject(settingsManager)
                 .environmentObject(authManager)
         case .contacts:

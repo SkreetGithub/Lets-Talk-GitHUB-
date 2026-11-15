@@ -42,7 +42,7 @@ struct Contact: Identifiable, Hashable, Codable {
         self.email = email
         self.lastMessage = lastMessage
         self.image = image
-        self.lastSeen = Date()
+        self.lastSeen = nil   // unknown until the profile loads (it used to default to "now")
     }
     
     init(from decoder: Decoder) throws {

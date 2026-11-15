@@ -70,6 +70,12 @@ class ChatDetailViewModel: ObservableObject {
                     )
                     loaded.userId = contactId
                     loaded.imageURL = user.photoURL
+                    // Real presence from their profile. The app refreshes last_seen every
+                    // 5 minutes while it's open, so "online" with an older last_seen is stale
+                    // (the app was closed without saying so) and shows as "Last seen" instead.
+                    loaded.lastSeen = user.lastSeen
+                    let recent = user.lastSeen.map { Date().timeIntervalSince($0) < 6 * 60 } ?? false
+                    loaded.isOnline = user.isOnline && recent
                     self.contact = loaded
                 }
             } catch {

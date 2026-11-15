@@ -144,6 +144,24 @@ final class SupabaseSignalingService: ObservableObject {
         stopListening(callId: callId)
     }
 
+    /// True if I've blocked this caller. Asks the server each time (a block made on another
+    /// device counts straight away). If the check fails, the call rings as usual.
+    private func isBlocked(callerId: String, me: String) async -> Bool {
+        struct BlockRow: Decodable { let blocked_id: String }
+        let ids = Array(Set([callerId, callerId.lowercased(), callerId.uppercased()]))
+        do {
+            let response = try await client.from("blocks")
+                .select("blocked_id")
+                .eq("blocker_id", value: me.lowercased())
+                .in("blocked_id", values: ids)
+                .limit(1)
+                .execute()
+            return !(try JSONDecoder().decode([BlockRow].self, from: response.data)).isEmpty
+        } catch {
+            return false
+        }
+    }
+
     /// Marks an unanswered outgoing call as missed (stops the other phone ringing).
     func markMissed(callId: String) async throws {
         _ = try await client.from("calls")
@@ -243,6 +261,11 @@ final class SupabaseSignalingService: ObservableObject {
                 // Announce each call once (it used to be re-announced every 1.5 s).
                 let isNew = withLock { announcedIncomingCallIds.insert(call.id).inserted }
                 guard isNew else { continue }
+                // Someone I've blocked: decline it quietly, with no call screen or ringing.
+                if await isBlocked(callerId: call.callerId, me: currentUserId) {
+                    try? await rejectCall(callId: call.id)
+                    continue
+                }
                 notify { $0.supabaseSignaling(self, didReceiveIncomingCall: call.asCall) }
             }
         } catch {

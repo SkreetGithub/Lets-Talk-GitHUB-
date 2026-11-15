@@ -771,6 +771,8 @@ private struct ProfileLookupRow: Codable {
     let name: String
     let phone: String
     let photoURL: String?
+    let lastSeen: Date?
+    let isOnline: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -778,10 +780,13 @@ private struct ProfileLookupRow: Codable {
         case name
         case phone
         case photoURL = "photo_url"
+        case lastSeen = "last_seen"
+        case isOnline = "is_online"
     }
 
     var asUser: User {
-        User(id: id, email: email, name: name, phone: phone, photoURL: photoURL)
+        User(id: id, email: email, name: name, phone: phone, photoURL: photoURL,
+             lastSeen: lastSeen, isOnline: isOnline ?? false)
     }
 }
 

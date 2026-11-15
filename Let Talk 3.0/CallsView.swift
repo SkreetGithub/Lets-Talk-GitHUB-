@@ -2,6 +2,9 @@ import SwiftUI
 import AVFoundation
 
 struct CallsView: View {
+    /// True while the Calls tab is the page on screen. The tabs live side by side in a pager,
+    /// so `onAppear` only runs once; this is how the list knows the tab was opened again.
+    var isActive: Bool = true
     @StateObject private var viewModel = CallsViewModel()
     @State private var showDialpad = false
     @State private var searchText = ""
@@ -57,6 +60,14 @@ struct CallsView: View {
         .onAppear {
             // Show calls made since the tab was last opened.
             Task { await viewModel.refreshCalls() }
+        }
+        .onChange(of: isActive) { _, active in
+            // Switched to the Calls tab: reload, so calls made since show up.
+            if active { Task { await viewModel.refreshCalls() } }
+        }
+        .onReceive(CallCoordinator.shared.$presentation) { presentation in
+            // A call screen just closed: add that call to the list.
+            if presentation == nil { Task { await viewModel.refreshCalls() } }
         }
     }
     
