@@ -392,7 +392,7 @@ struct LoadingView: View {
             ProgressView()
                 .scaleEffect(1.2)
             
-            Text(message)
+            Text(LocalizedStringKey(message))
                 .font(.subheadline)
                 .foregroundColor(.secondary)
         }
@@ -421,13 +421,13 @@ struct EmptyStateView: View {
     // sized the system way; lifted above the floating tab bar so it reads as centered.
     var body: some View {
         ContentUnavailableView {
-            Label(title, systemImage: icon)
+            Label(LocalizedStringKey(title), systemImage: icon)
                 .symbolRenderingMode(.hierarchical)
         } description: {
-            Text(message)
+            Text(LocalizedStringKey(message))
         } actions: {
             if let actionTitle, let action {
-                Button(actionTitle, action: action)
+                Button(LocalizedStringKey(actionTitle), action: action)
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.capsule)
                     .controlSize(.large)

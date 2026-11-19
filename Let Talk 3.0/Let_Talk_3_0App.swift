@@ -74,6 +74,8 @@ struct Let_Talk_3_0App: App {
             }
             .preferredColorScheme(preferredColorScheme)
             .tint(settingsManager.settings.theme.accent)
+            // The whole app in the language picked in Settings (instantly, no restart).
+            .appLanguage(settingsManager.settings.language)
             .onChange(of: settingsManager.settings.theme) { _, theme in settingsManager.applyTheme(theme) }
             // Every scroll view in the app (lists, chats, settings) closes the keyboard when dragged.
             .scrollDismissesKeyboard(.interactively)

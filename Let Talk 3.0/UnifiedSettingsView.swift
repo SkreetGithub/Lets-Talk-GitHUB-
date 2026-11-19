@@ -281,7 +281,7 @@ struct UnifiedSettingsView: View {
                         .frame(width: 24)
                     Text("Theme")
                     Spacer()
-                    Text(settingsManager.settings.theme.displayName)
+                    Text(LocalizedStringKey(settingsManager.settings.theme.displayName))
                         .foregroundColor(.secondary)
                     Image(systemName: "chevron.right")
                         .foregroundColor(.secondary)
@@ -354,7 +354,7 @@ struct UnifiedSettingsView: View {
                 set: { settingsManager.setTranslationProvider($0) }
             )) {
                 ForEach(TranslationProvider.available, id: \.self) { provider in
-                    Text(provider.displayName).tag(provider)
+                    Text(LocalizedStringKey(provider.displayName)).tag(provider)
                 }
             } label: {
                 HStack {
@@ -948,7 +948,7 @@ struct AudioSettingsView: View {
                         set: { settingsManager.setVideoQuality($0) }
                     )) {
                         ForEach(VideoQuality.allCases, id: \.self) { quality in
-                            Text(quality.displayName).tag(quality)
+                            Text(LocalizedStringKey(quality.displayName)).tag(quality)
                         }
                     }
                     

@@ -270,7 +270,7 @@ struct CallInterfaceView: View {
                         ProgressView()
                             .tint(.white)
                     }
-                    Text(statusText)
+                    Text(LocalizedStringKey(statusText))
                         .font(.headline)
                         .foregroundColor(.white)
                 }
@@ -295,7 +295,7 @@ struct CallInterfaceView: View {
                 .fill(connectionStatusColor)
                 .frame(width: 8, height: 8)
             
-            Text(connectionStatusText)
+            Text(LocalizedStringKey(connectionStatusText))
                 .font(.caption)
                 .foregroundColor(.white.opacity(0.8))
         }

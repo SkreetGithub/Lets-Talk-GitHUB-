@@ -298,7 +298,7 @@ struct TabButton: View {
                     .font(.system(size: 18, weight: .medium))
                     .symbolEffect(.bounce, value: bounceCount)
                 
-                Text(tab.title)
+                Text(LocalizedStringKey(tab.title))
                     .font(.system(size: 10, weight: .medium))
             }
             .foregroundColor(selectedTab == tab ? .white : .gray)
@@ -395,7 +395,7 @@ struct QuickActionButton: View {
                     .font(.system(size: 20, weight: .medium))
                     .foregroundColor(color)
                 
-                Text(title)
+                Text(LocalizedStringKey(title))
                     .font(.system(size: 10, weight: .medium))
                     .foregroundColor(.primary)
             }
@@ -1032,7 +1032,7 @@ struct ThemeSettingsView: View {
                                         .foregroundColor(.blue)
                                         .frame(width: 24)
                                     
-                                    Text(theme.displayName)
+                                    Text(LocalizedStringKey(theme.displayName))
                                         .foregroundColor(.primary)
                                     
                                     Spacer()

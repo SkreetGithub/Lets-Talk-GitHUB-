@@ -97,7 +97,7 @@ struct ChatStyleSettingsView: View {
                                         .stroke(Color.primary, lineWidth: settingsManager.settings.callInterface.background == color ? 2 : 0)
                                 )
                             
-                            Text(color.displayName)
+                            Text(LocalizedStringKey(color.displayName))
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
@@ -193,7 +193,7 @@ struct ThemePreviewCard: View {
                 HStack(spacing: 4) {
                     Image(systemName: theme.icon)
                         .font(.caption)
-                    Text(theme.displayName)
+                    Text(LocalizedStringKey(theme.displayName))
                         .font(.caption)
                         .fontWeight(.medium)
                 }

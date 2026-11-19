@@ -393,8 +393,8 @@ extension AddContactView {
                 .frame(width: 44, height: 44)
                 .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(color))
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.headline).foregroundStyle(.primary)
-                Text(detail).font(.caption).foregroundStyle(.secondary)
+                Text(LocalizedStringKey(title)).font(.headline).foregroundStyle(.primary)
+                Text(LocalizedStringKey(detail)).font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
             Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)

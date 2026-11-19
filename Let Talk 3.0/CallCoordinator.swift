@@ -152,6 +152,7 @@ final class CallCoordinator: ObservableObject {
         let root = CallInterfaceView(call: presentation.call, isIncoming: presentation.isIncoming)
             .environmentObject(AuthManager.shared)
             .environmentObject(SettingsManager.shared)
+            .appLanguage(SettingsManager.shared.settings.language)
         let host = UIHostingController(rootView: AnyView(root))
         host.view.backgroundColor = .black
 

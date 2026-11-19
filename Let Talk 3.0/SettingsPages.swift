@@ -39,10 +39,10 @@ struct SettingsMenuRow: View {
                 .frame(width: 30, height: 30)
                 .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(color))
                 .accessibilityHidden(true)
-            Text(title)
+            Text(LocalizedStringKey(title))
             Spacer()
             if let value {
-                Text(value).foregroundStyle(.secondary)
+                Text(LocalizedStringKey(value)).foregroundStyle(.secondary)
             }
         }
     }
@@ -67,7 +67,7 @@ struct AppearanceSettingsPage: View {
                                                      startPoint: .topLeading, endPoint: .bottomTrailing))
                                 .frame(width: 26, height: 26)
                                 .overlay(Image(systemName: theme.icon).font(.system(size: 11, weight: .bold)).foregroundStyle(.white))
-                            Text(theme.displayName).foregroundStyle(.primary)
+                            Text(LocalizedStringKey(theme.displayName)).foregroundStyle(.primary)
                             Spacer()
                             if settingsManager.settings.theme == theme {
                                 Image(systemName: "checkmark").fontWeight(.bold).foregroundStyle(.tint)
@@ -142,7 +142,7 @@ struct LanguageTranslationSettingsPage: View {
                     set: { settingsManager.setTranslationProvider($0) }
                 )) {
                     ForEach(TranslationProvider.available, id: \.self) { provider in
-                        Text(provider.displayName).tag(provider)
+                        Text(LocalizedStringKey(provider.displayName)).tag(provider)
                     }
                 } label: {
                     Label("Translation Quality", systemImage: "sparkles")
@@ -241,7 +241,7 @@ struct AudioVideoSettingsPage: View {
                     set: { settingsManager.setVideoQuality($0) }
                 )) {
                     ForEach(VideoQuality.allCases, id: \.self) { quality in
-                        Text(quality.displayName).tag(quality)
+                        Text(LocalizedStringKey(quality.displayName)).tag(quality)
                     }
                 } label: {
                     Label("Video Quality", systemImage: "video.fill")

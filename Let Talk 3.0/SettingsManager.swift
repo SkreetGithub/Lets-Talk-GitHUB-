@@ -134,6 +134,7 @@ final class SettingsManager: ObservableObject {
     func setLanguage(_ language: String) {
         settings.language = language
         saveSettings()
+        AppLanguage.applyToSystem(language)
         Task { @MainActor in
             LiveTranslationSession.shared.adoptSavedLanguage()
             await AuthManager.shared.syncLanguage(language)

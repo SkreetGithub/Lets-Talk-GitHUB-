@@ -235,7 +235,7 @@ struct EnhancedAuthView: View {
                     } label: {
                         HStack(spacing: DS.spacingXS) {
                             Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                            Text(option.title)
+                            Text(LocalizedStringKey(option.title))
                         }
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(selected ? Self.actionPink : .white)
