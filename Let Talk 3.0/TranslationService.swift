@@ -222,6 +222,8 @@ class SpeechRecognizer {
     private var speechRecognizer: SFSpeechRecognizer?
     private var audioSession: AVAudioSession?
     private var completion: ((Result<String, Error>) -> Void)?
+    /// True while listening to the call's microphone feed instead of our own engine.
+    private var usingCallAudio = false
     
     func startRecording(language: String, completion: @escaping (Result<String, Error>) -> Void) {
         self.completion = completion
@@ -265,6 +267,36 @@ class SpeechRecognizer {
             return
         }
         
+        // During a call the microphone belongs to the call (CallAudioDevice). Listen to the same
+        // feed instead of opening a second engine, which only ever got a dead 0 Hz input.
+        if WebRTCCallManager.shared.isInCall {
+            audioSession = nil
+            let request = SFSpeechAudioBufferRecognitionRequest()
+            request.shouldReportPartialResults = true
+            recognitionRequest = request
+            recognitionTask = speechRecognizer.recognitionTask(with: request) { [weak self] result, error in
+                if let error = error {
+                    Task { @MainActor in completion(.failure(error)) }
+                    self?.stopRecording()
+                    return
+                }
+                if let result = result {
+                    let text = result.bestTranscription.formattedString
+                    Task { @MainActor in
+                        completion(.success(text))
+                        // Keep a call's translation listening after each finished sentence.
+                        if result.isFinal { completion(.failure(SpeechRecognitionError.finished)) }
+                    }
+                    if result.isFinal { self?.stopRecording() }
+                }
+            }
+            CallAudioDevice.shared.onMicrophoneBuffer = { [weak request] buffer in
+                request?.append(buffer)
+            }
+            usingCallAudio = true
+            return
+        }
+
         // Setup audio session. During a call WebRTC already owns a .playAndRecord/.voiceChat session:
         // leave it alone (switching mode/route here broke the call's audio). Only configure it when
         // nothing else has.
@@ -353,6 +385,10 @@ class SpeechRecognizer {
     }
     
     func stopRecording() {
+        if usingCallAudio {
+            CallAudioDevice.shared.onMicrophoneBuffer = nil
+            usingCallAudio = false
+        }
         // Stop audio engine safely
         if let audioEngine = audioEngine {
             if audioEngine.isRunning { audioEngine.stop() }
@@ -409,6 +445,8 @@ enum SpeechRecognitionError: Error {
     case notAuthorized
     case recognizerNotAvailable
     case audioEngineError
+    /// The recognizer delivered its final result and stopped (calls restart it to keep listening).
+    case finished
 }
 
 extension TranslationError: LocalizedError {
@@ -441,6 +479,8 @@ extension SpeechRecognitionError: LocalizedError {
             return "Speech recognizer not available for the selected language"
         case .audioEngineError:
             return "Error with audio engine"
+        case .finished:
+            return "Listening finished"
         }
     }
 }

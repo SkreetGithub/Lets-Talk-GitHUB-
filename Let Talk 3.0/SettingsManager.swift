@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import Combine
 import Supabase
 
@@ -111,18 +112,15 @@ final class SettingsManager: ObservableObject {
         saveSettings()
     }
 
-    private func applyTheme(_ theme: AppTheme) {
+    /// Applies the theme to every window of every scene (the call screen and alerts live in
+    /// their own windows, so the old code — first scene only — missed them).
+    func applyTheme(_ theme: AppTheme) {
         DispatchQueue.main.async {
-            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-                windowScene.windows.forEach { window in
-                    switch theme {
-                    case .light:
-                        window.overrideUserInterfaceStyle = .light
-                    case .dark:
-                        window.overrideUserInterfaceStyle = .dark
-                    case .system, .ocean, .sunset, .forest, .lavender, .fire, .arctic, .cosmic:
-                        window.overrideUserInterfaceStyle = .unspecified
-                    }
+            for scene in UIApplication.shared.connectedScenes {
+                guard let windowScene = scene as? UIWindowScene else { continue }
+                for window in windowScene.windows {
+                    window.overrideUserInterfaceStyle = theme.interfaceStyle
+                    window.tintColor = theme.uiAccent
                 }
             }
         }
@@ -435,6 +433,39 @@ enum AppTheme: String, CaseIterable, Codable {
             return false
         default:
             return true
+        }
+    }
+
+    /// The app-wide accent: buttons, links, switches, selected tab, sent bubbles.
+    var accent: Color { Color(uiAccent) }
+
+    var uiAccent: UIColor {
+        switch self {
+        case .light, .dark, .system: return .systemBlue
+        case .ocean: return .systemTeal
+        case .sunset: return .systemOrange
+        case .forest: return .systemGreen
+        case .lavender: return .systemPurple
+        case .fire: return .systemRed
+        case .arctic: return .systemCyan
+        case .cosmic: return .systemIndigo
+        }
+    }
+
+    /// Light / dark for the whole app (every window, sheet and the call screen).
+    var interfaceStyle: UIUserInterfaceStyle {
+        switch self {
+        case .light, .arctic: return .light
+        case .dark, .cosmic: return .dark
+        default: return .unspecified
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch interfaceStyle {
+        case .light: return .light
+        case .dark: return .dark
+        default: return nil
         }
     }
 }

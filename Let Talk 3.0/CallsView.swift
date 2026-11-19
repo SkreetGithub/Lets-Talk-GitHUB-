@@ -10,6 +10,8 @@ struct CallsView: View {
     @State private var searchText = ""
     @State private var selectedCall: CallRecord?
     @State private var showCallDetails = false
+    @State private var chatToOpen: Chat?
+    @State private var chatError: String?
     
     var body: some View {
         // Own navigation bar so the search field sits at the top under the title (see ContactsView).
@@ -54,6 +56,17 @@ struct CallsView: View {
         .sheet(item: $selectedCall) { call in
             CallDetailsView(call: call)
         }
+        .fullScreenCover(item: $chatToOpen) { chat in
+            ChatDetailView(chat: chat)
+        }
+        .alert("Can't Open Chat", isPresented: Binding(
+            get: { chatError != nil },
+            set: { if !$0 { chatError = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(chatError ?? "")
+        }
         .logoRefreshable {
             await viewModel.refreshCalls()
         }
@@ -81,13 +94,40 @@ struct CallsView: View {
                             .tapGlow {
                                 selectedCall = call
                             }
-                            // Long-press menu instead of row swipes: horizontal swipes switch tabs.
+                            // Swipe left: Delete. Swipe right: Call back.
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    viewModel.deleteCall(call)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                Button {
+                                    viewModel.initiateCall(to: call.contact)
+                                } label: {
+                                    Label("Call", systemImage: "phone.fill")
+                                }
+                                .tint(.green)
+                            }
+                            // Long-press: Call / Video / Message / Delete.
                             .contextMenu {
                                 Button {
                                     viewModel.initiateCall(to: call.contact)
                                 } label: {
                                     Label("Call", systemImage: "phone")
                                 }
+                                Button {
+                                    viewModel.initiateCall(to: call.contact, isVideo: true)
+                                } label: {
+                                    Label("Video Call", systemImage: "video")
+                                }
+                                Button {
+                                    openChat(with: call.contact)
+                                } label: {
+                                    Label("Message", systemImage: "message")
+                                }
+                                Divider()
                                 Button(role: .destructive) {
                                     viewModel.deleteCall(call)
                                 } label: {
@@ -102,6 +142,18 @@ struct CallsView: View {
         .contentMargins(.bottom, DS.floatingTabBarClearance + 60, for: .scrollContent)   // clears tab bar + dial button
     }
     
+    /// Long-press › Message: opens (or creates) the conversation with that caller.
+    private func openChat(with contact: Contact) {
+        Task {
+            do {
+                let chat = try await DatabaseManager.shared.openChat(with: contact)
+                await MainActor.run { chatToOpen = chat }
+            } catch {
+                await MainActor.run { chatError = error.localizedDescription }
+            }
+        }
+    }
+
     private var groupedCalls: [Date: [CallRecord]] {
         Dictionary(grouping: filteredCalls) { call in
             Calendar.current.startOfDay(for: call.timestamp)

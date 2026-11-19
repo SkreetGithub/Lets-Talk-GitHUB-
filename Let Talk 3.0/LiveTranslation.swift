@@ -90,6 +90,8 @@ final class LiveTranslationSession: ObservableObject {
         recognizer.stopRecording()
         synthesizer.stopSpeaking(at: .immediate)
         TranslatedVoicePlayer.shared.stop()
+        unduckTask?.cancel()
+        CallAudioDevice.shared.remoteVolume = 1
         peerVoiceId = nil
         mySpeech = ""
         subtitle = ""
@@ -242,11 +244,13 @@ final class LiveTranslationSession: ObservableObject {
         }
         // Block the mic right away; extended once the clip's real length is known.
         ignoreSpeechUntil = Date().addingTimeInterval(Double(text.count) * 0.08 + 0.8)
+        duckOriginalVoice(for: Double(text.count) * 0.08 + 0.8)
         Task { [weak self] in
             guard let self else { return }
             do {
                 let duration = try await TranslatedVoicePlayer.shared.speak(text, voiceId: voiceId, language: self.myLanguage.code)
                 self.ignoreSpeechUntil = max(self.ignoreSpeechUntil, Date().addingTimeInterval(duration + 0.5))
+                self.duckOriginalVoice(for: duration + 0.3)
             } catch {
                 debugLog("Translated voice unavailable, using device voice:", error)
                 self.speakWithDeviceVoice(text)
@@ -260,7 +264,22 @@ final class LiveTranslationSession: ObservableObject {
         utterance.rate = 0.5
         // Ignore the microphone while the translated voice plays so it isn't re-translated.
         ignoreSpeechUntil = Date().addingTimeInterval(Double(text.count) * 0.08 + 0.8)
+        duckOriginalVoice(for: Double(text.count) * 0.08 + 0.8)
         synthesizer.speak(utterance)
+    }
+
+    private var unduckTask: Task<Void, Never>?
+
+    /// Turns the other person's real voice down while their translation plays, so the
+    /// translation is what you hear; it comes back up when the translation ends.
+    private func duckOriginalVoice(for seconds: Double) {
+        CallAudioDevice.shared.remoteVolume = 0.2
+        unduckTask?.cancel()
+        unduckTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(max(0.5, seconds) * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            CallAudioDevice.shared.remoteVolume = 1
+        }
     }
 
     private func scheduleSubtitleClear() {

@@ -5,6 +5,8 @@ struct PhoneVerificationView: View {
     // MARK: - Properties
     @Binding var isPresented: Bool
     @Binding var isLoggedIn: Bool
+    /// Settings › My Let Talk Number › Change Number (instead of the sign-up step).
+    var isChangingNumber: Bool = false
     @EnvironmentObject var authManager: AuthManager
     
     // MARK: - State Variables
@@ -108,13 +110,15 @@ struct PhoneVerificationView: View {
                                 .font(.system(size: 80))
                                 .foregroundColor(.white)
                             
-                            Text("Get Your Phone Number")
+                            Text(isChangingNumber ? "Change Your Number" : "Get Your Let Talk Number")
                                 .font(.largeTitle)
                                 .fontWeight(.bold)
                                 .foregroundColor(.white)
                                 .multilineTextAlignment(.center)
                             
-                            Text("Choose your state, area code, and get 5 random numbers to pick from")
+                            Text(isChangingNumber
+                                 ? "Pick a new number. You can change your number once a year."
+                                 : "This is the number people call and text you on in Let Talk. Choose your state and area code, then pick one of 5 free numbers.")
                                 .font(.subheadline)
                                 .foregroundColor(.white.opacity(0.8))
                                 .multilineTextAlignment(.center)
@@ -179,7 +183,14 @@ struct PhoneVerificationView: View {
                 }
             }
             .navigationBarItems(trailing: Button("Cancel") {
-                isPresented = false
+                if isChangingNumber {
+                    isPresented = false
+                } else {
+                    // Sign-up isn't finished without a number: go back to Sign In instead of
+                    // leaving a half-made account signed in.
+                    Task { try? await authManager.signOut() }
+                    isPresented = false
+                }
             })
         }
     }
@@ -447,7 +458,7 @@ struct PhoneVerificationView: View {
             completePhoneVerification()
         }) {
             HStack {
-                Text("Continue to App")
+                Text(isChangingNumber ? "Save New Number" : "Continue to App")
                     .font(.headline)
                 Image(systemName: "arrow.right")
             }
@@ -462,17 +473,42 @@ struct PhoneVerificationView: View {
     }
     
     private func generateRandomNumbers() {
-        var numbers: [String] = []
-        for _ in 0..<5 { // Generate 5 random numbers
-            var randomNum = ""
-            for _ in 0..<7 {
-                randomNum += String(Int.random(in: 0...9))
-            }
-            // Format as XXX-XXXX
-            randomNum = "\(randomNum.prefix(3))-\(randomNum.suffix(4))"
-            numbers.append(randomNum)
+        var numbers: Set<String> = []
+        while numbers.count < 8 {
+            // Exchange can't start with 0 or 1 (real North American numbering).
+            let exchange = String(Int.random(in: 2...9)) + String(format: "%02d", Int.random(in: 0...99))
+            let line = String(format: "%04d", Int.random(in: 0...9999))
+            numbers.insert("\(exchange)-\(line)")
         }
-        randomNumbers = numbers.sorted()
+        let candidates = Array(numbers)
+        randomNumbers = Array(candidates.prefix(5)).sorted()
+        // Only offer numbers nobody has (the server keeps numbers unique).
+        let code = areaCode
+        Task {
+            guard let free = await Self.availableNumbers(candidates.map { "(\(code)) \($0)" }) else { return }
+            let freeSet = Set(free)
+            let picks = candidates.filter { freeSet.contains("(\(code)) \($0)") }
+            await MainActor.run {
+                guard areaCode == code else { return }
+                randomNumbers = Array(picks.prefix(5)).sorted()
+                selectedNumbers.removeAll { !randomNumbers.contains($0) }
+            }
+        }
+    }
+
+    /// Which of these numbers are still free (server function `numbers_available`).
+    /// nil when the check can't run; the database still refuses a taken number.
+    private static func availableNumbers(_ candidates: [String]) async -> [String]? {
+        struct Params: Encodable { let candidates: [String] }
+        do {
+            let response = try await SupabaseManager.client
+                .rpc("numbers_available", params: Params(candidates: candidates))
+                .execute()
+            return try JSONDecoder().decode([String].self, from: response.data)
+        } catch {
+            debugLog("numbers_available failed:", error)
+            return nil
+        }
     }
     
     private func selectNumber(_ number: String) {
@@ -497,20 +533,21 @@ struct PhoneVerificationView: View {
     }
     
     private func completePhoneVerification() {
-        // Show confetti first
-        withAnimation(.spring()) {
-            showConfetti = true
-            canNavigate = true
-        }
-        
-        // Create the full phone number
         let fullPhoneNumber = "(\(areaCode)) \(selectedNumbers.joined(separator: "-"))"
-        
+        errorMessage = ""
+
         Task {
             do {
-                try await authManager.completePhoneVerification(phoneNumber: fullPhoneNumber)
-                
+                if isChangingNumber {
+                    try await authManager.changeNumber(to: fullPhoneNumber)
+                } else {
+                    try await authManager.completePhoneVerification(phoneNumber: fullPhoneNumber)
+                }
                 await MainActor.run {
+                    withAnimation(.spring()) {
+                        showConfetti = true
+                        canNavigate = true
+                    }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                         isPresented = false
                         isLoggedIn = true
@@ -518,7 +555,15 @@ struct PhoneVerificationView: View {
                 }
             } catch {
                 await MainActor.run {
-                    errorMessage = error.localizedDescription
+                    errorMessage = NumberRules.message(for: error)
+                    // Someone just took it: offer fresh numbers.
+                    if NumberRules.isTaken(error) {
+                        isLocked = false
+                        lockProgress = 0
+                        canNavigate = false
+                        selectedNumbers = []
+                        generateRandomNumbers()
+                    }
                 }
             }
         }

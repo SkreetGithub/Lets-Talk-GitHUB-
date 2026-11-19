@@ -20,18 +20,9 @@ struct Let_Talk_3_0App: App {
     @State private var isSplashActive = true
     @State private var splashTimer: Timer?
     
-    // Computed property for preferred color scheme based on settings
+    // Light / dark from Settings › Appearance (nil = follow the iPhone).
     private var preferredColorScheme: ColorScheme? {
-        switch settingsManager.settings.theme {
-        case .light:
-            return .light
-        case .dark:
-            return .dark
-        case .system:
-            return nil // Use system default
-        case .ocean, .sunset, .forest, .lavender, .fire, .arctic, .cosmic:
-            return nil // Use system default for gradient themes
-        }
+        settingsManager.settings.theme.colorScheme
     }
     
     var body: some Scene {
@@ -45,7 +36,7 @@ struct Let_Talk_3_0App: App {
                         endPoint: .bottomTrailing
                     )
                     .ignoresSafeArea()
-                    .opacity(0.1) // Subtle background
+                    .opacity(0.18) // Subtle background
                 }
                 
                 if isSplashActive {
@@ -82,6 +73,8 @@ struct Let_Talk_3_0App: App {
                 DynamicIslandViews()
             }
             .preferredColorScheme(preferredColorScheme)
+            .tint(settingsManager.settings.theme.accent)
+            .onChange(of: settingsManager.settings.theme) { _, theme in settingsManager.applyTheme(theme) }
             // Every scroll view in the app (lists, chats, settings) closes the keyboard when dragged.
             .scrollDismissesKeyboard(.interactively)
             .sheet(isPresented: $aiConsent.needsPrompt) {
@@ -144,6 +137,10 @@ struct Let_Talk_3_0App: App {
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // VoIP pushes must be registered at launch, not when a screen appears: when the app is
+        // closed, iOS wakes it in the background for an incoming call and no screen ever appears,
+        // so the call was never delivered (and iOS stops sending VoIP pushes to apps that miss them).
+        CallKitManager.shared.registerVoIP()
         // Configure Push Notifications
         let notificationCenter = UNUserNotificationCenter.current()
         notificationCenter.delegate = NotificationManager.shared

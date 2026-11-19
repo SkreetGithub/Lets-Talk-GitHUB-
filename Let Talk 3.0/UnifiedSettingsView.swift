@@ -28,46 +28,81 @@ struct UnifiedSettingsView: View {
     @State private var accountMessage: (title: String, body: String)?
     
     var body: some View {
-        NavigationView {
+        // A short menu (iPhone Settings style): each row opens a page with the detailed options.
+        NavigationStack {
             List {
-                // Profile Section
                 profileSection
-                
-                // Translation Settings Section
-                translationSection
-                
-                // Appearance Section
-                appearanceSection
-                
-                // Language & Translation Section
-                languageSection
-                
-                // Audio & Video Section
-                audioVideoSection
-                
-                // Notifications Section
-                notificationsSection
-                
-                // Privacy Section
-                privacySection
-                
-                // Data Management Section
-                dataManagementSection
-                
-                // Account Section
-                legalSection
-                AboutSection()
+
+                Section {
+                    NavigationLink {
+                        MyNumberView().environmentObject(authManager)
+                    } label: {
+                        SettingsMenuRow(title: "My Let Talk Number", icon: "number", color: .green,
+                                        value: authManager.currentUser?.phone)
+                    }
+                    Button { showMyQRCode = true } label: {
+                        HStack {
+                            SettingsMenuRow(title: "My QR Code", icon: "qrcode", color: .black).foregroundStyle(.primary)
+                            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+
+                Section {
+                    NavigationLink {
+                        AppearanceSettingsPage()
+                    } label: {
+                        SettingsMenuRow(title: "Appearance", icon: "paintbrush.fill", color: .purple,
+                                        value: settingsManager.settings.theme.displayName)
+                    }
+                    NavigationLink {
+                        LanguageTranslationSettingsPage(translationViewModel: translationViewModel)
+                    } label: {
+                        SettingsMenuRow(title: "Language & Translation", icon: "globe", color: .blue,
+                                        value: LanguageTranslationSettingsPage.languages
+                                            .first { $0.code == settingsManager.settings.language }?.name)
+                    }
+                    NavigationLink {
+                        AudioVideoSettingsPage()
+                    } label: {
+                        SettingsMenuRow(title: "Audio & Video", icon: "speaker.wave.2.fill", color: .pink)
+                    }
+                    NavigationLink {
+                        NotificationsSettingsPage()
+                    } label: {
+                        SettingsMenuRow(title: "Notifications", icon: "bell.badge.fill", color: .red)
+                    }
+                    NavigationLink {
+                        PrivacySafetySettingsPage()
+                    } label: {
+                        SettingsMenuRow(title: "Privacy & Safety", icon: "hand.raised.fill", color: .indigo)
+                    }
+                }
+
+                Section {
+                    NavigationLink {
+                        DataStorageSettingsPage(translationViewModel: translationViewModel)
+                    } label: {
+                        SettingsMenuRow(title: "Data & Storage", icon: "externaldrive.fill", color: .gray)
+                    }
+                    NavigationLink {
+                        HelpLegalSettingsPage()
+                    } label: {
+                        SettingsMenuRow(title: "Help & Legal", icon: "questionmark.circle.fill", color: .teal)
+                    }
+                }
+
                 accountSection
                 deleteAccountSection
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
-            .navigationBarItems(
-                trailing: Button("Done") {
-                    presentationMode.wrappedValue.dismiss()
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { presentationMode.wrappedValue.dismiss() }
                 }
-            )
+            }
         }
         .alert("Sign Out", isPresented: $showSignOutAlert) {
             Button("Cancel", role: .cancel) { }
@@ -181,20 +216,6 @@ struct UnifiedSettingsView: View {
                 }
             }
             .buttonStyle(PlainButtonStyle())
-
-            Button {
-                showMyQRCode = true
-            } label: {
-                Label("My QR Code", systemImage: "qrcode")
-            }
-
-            Button {
-                showVoiceSettings = true
-            } label: {
-                Label("Voice Settings", systemImage: "waveform")
-            }
-        } header: {
-            Text("Profile")
         }
     }
     

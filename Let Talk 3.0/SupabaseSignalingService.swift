@@ -273,6 +273,14 @@ final class SupabaseSignalingService: ObservableObject {
         }
     }
 
+    /// One-off read of a call's status (CallKit uses it to stop ringing when the caller hangs up
+    /// while the app is in the background).
+    func fetchCallStatus(callId: String) async -> CallStatus? {
+        guard let response = try? await client.from("calls").select().eq("id", value: callId).single().execute(),
+              let row = try? decoder.decode(CallRowData.self, from: response.data) else { return nil }
+        return row.asCall.status
+    }
+
     /// Watches a call row (answered / rejected / ended / missed). Used by the caller, and by the
     /// callee while ringing so it stops ringing if the caller hangs up first.
     func watchCall(callId: String) {

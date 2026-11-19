@@ -3,6 +3,7 @@ import AVFoundation
 import CoreImage.CIFilterBuiltins
 import PhotosUI
 import VisionKit
+import Contacts
 
 // MARK: - Payload
 
@@ -93,16 +94,24 @@ struct MyQRCodeView: View {
                 }
 
                 VStack(spacing: DS.spacingXS) {
+                    ProfileImageView(imageURL: authManager.currentUser?.photoURL,
+                                     placeholderText: Initials.from(authManager.currentUser?.name ?? ""),
+                                     size: 56)
                     Text(authManager.currentUser?.name ?? "")
                         .font(.title2.bold())
                     if let phone = authManager.currentUser?.phone, !phone.isEmpty {
-                        Text(phone)
+                        Label(phone, systemImage: "phone.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let email = authManager.currentUser?.email, !email.isEmpty {
+                        Label(email, systemImage: "envelope.fill")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                 }
 
-                Text("Friends can add you by opening Let Talk → Contacts → Add Contact → Scan QR Code.")
+                Text("Friends scan this in Let Talk (Contacts → + → Scan QR Code) to add your photo, number and email.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -134,6 +143,8 @@ struct QRScannerView: View {
 
     private enum Phase: Equatable {
         case scanning
+        case looking
+        case found(userId: String, name: String, phone: String, email: String, photoURL: String?)
         case adding
         case failed(String)
     }
@@ -141,6 +152,8 @@ struct QRScannerView: View {
     @State private var phase: Phase = .scanning
     @State private var cameraState: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
     @State private var photoItem: PhotosPickerItem?
+    /// Also put this person in the iPhone's own Contacts app.
+    @State private var saveToPhone = false
 
     private var canScanLive: Bool {
         cameraState == .authorized
@@ -206,35 +219,74 @@ struct QRScannerView: View {
 
     private var bottomPanel: some View {
         VStack(spacing: DS.spacingM) {
-            Group {
-                switch phase {
-                case .scanning:
-                    Text(canScanLive ? "Point the camera at a Let Talk QR code." : " ")
-                case .adding:
-                    HStack(spacing: DS.spacingS) {
-                        ProgressView()
-                        Text("Adding contact…")
+            if case let .found(userId, name, phone, email, photoURL) = phase {
+                foundCard(userId: userId, name: name, phone: phone, email: email, photoURL: photoURL)
+            } else {
+                Group {
+                    switch phase {
+                    case .scanning:
+                        Text(canScanLive ? "Point the camera at a Let Talk QR code." : " ")
+                    case .looking, .adding:
+                        HStack(spacing: DS.spacingS) {
+                            ProgressView()
+                            Text(phase == .adding ? "Adding contact…" : "Finding contact…")
+                        }
+                    case .failed(let message):
+                        Label(message, systemImage: "exclamationmark.circle.fill")
+                    case .found:
+                        EmptyView()
                     }
-                case .failed(let message):
-                    Label(message, systemImage: "exclamationmark.circle.fill")
                 }
-            }
-            .font(.subheadline.weight(.medium))
-            .multilineTextAlignment(.center)
+                .font(.subheadline.weight(.medium))
+                .multilineTextAlignment(.center)
 
-            PhotosPicker(selection: $photoItem, matching: .images) {
-                Label("Scan from Photo", systemImage: "photo.on.rectangle")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: DS.primaryButtonHeight)
+                PhotosPicker(selection: $photoItem, matching: .images) {
+                    Label("Scan from Photo", systemImage: "photo.on.rectangle")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: DS.primaryButtonHeight)
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .disabled(phase == .adding || phase == .looking)
             }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
-            .disabled(phase == .adding)
         }
         .padding(DS.spacingL)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: DS.cornerRadiusL))
         .padding(DS.spacingM)
+    }
+
+    /// The scanned person's contact card: photo, name, Let Talk number and email, then Add.
+    private func foundCard(userId: String, name: String, phone: String, email: String, photoURL: String?) -> some View {
+        VStack(spacing: DS.spacingM) {
+            HStack(spacing: DS.spacingM) {
+                ProfileImageView(imageURL: photoURL, placeholderText: Initials.from(name), size: 64)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(name).font(.title3.bold()).lineLimit(1)
+                    if !phone.isEmpty {
+                        Label(phone, systemImage: "phone.fill").font(.subheadline)
+                    }
+                    if !email.isEmpty {
+                        Label(email, systemImage: "envelope.fill").font(.subheadline).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            Toggle("Also save to iPhone Contacts", isOn: $saveToPhone)
+                .font(.subheadline)
+            HStack(spacing: DS.spacingM) {
+                Button("Scan Again") { phase = .scanning }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                Button {
+                    add(userId: userId, name: name, phone: phone, email: email)
+                } label: {
+                    Text("Add Contact").font(.headline).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+            }
+        }
     }
 
     private func scanPhoto(_ item: PhotosPickerItem) async {
@@ -254,16 +306,41 @@ struct QRScannerView: View {
     }
 
     private func handle(_ payload: String) {
-        guard phase != .adding else { return }
+        switch phase {
+        case .adding, .looking, .found: return   // already showing someone
+        default: break
+        }
         guard let userId = LetTalkQR.userId(from: payload) else {
             phase = .failed(QRAddError.notLetTalkCode.localizedDescription)
             Haptics.failure()
             return
         }
+        guard userId != AuthManager.shared.currentUserId?.lowercased() else {
+            phase = .failed(QRAddError.ownCode.localizedDescription)
+            Haptics.failure()
+            return
+        }
+        phase = .looking
+        Task {
+            do {
+                let user = try await DatabaseManager.shared.getUser(id: userId)
+                Haptics.success()
+                phase = .found(userId: userId, name: user.name, phone: user.phone,
+                               email: user.email, photoURL: user.photoURL)
+            } catch {
+                phase = .failed(QRAddError.accountNotFound.localizedDescription)
+                Haptics.failure()
+            }
+        }
+    }
+
+    private func add(userId: String, name: String, phone: String, email: String) {
         phase = .adding
+        let alsoPhone = saveToPhone
         Task {
             do {
                 let contact = try await ContactManager.shared.addContact(letTalkUserId: userId)
+                if alsoPhone { await PhoneContacts.save(name: name, phone: phone, email: email) }
                 Haptics.success()
                 dismiss()
                 onAdded(contact)
@@ -271,6 +348,35 @@ struct QRScannerView: View {
                 phase = .failed(error.localizedDescription)
                 Haptics.failure()
             }
+        }
+    }
+}
+
+/// Saves a person into the iPhone's own Contacts app (asks for access the first time).
+enum PhoneContacts {
+    @discardableResult
+    static func save(name: String, phone: String, email: String) async -> Bool {
+        let store = CNContactStore()
+        let granted = (try? await store.requestAccess(for: .contacts)) ?? false
+        guard granted else { return false }
+        let contact = CNMutableContact()
+        let parts = name.split(separator: " ", maxSplits: 1).map(String.init)
+        contact.givenName = parts.first ?? name
+        if parts.count > 1 { contact.familyName = parts[1] }
+        if !phone.isEmpty {
+            contact.phoneNumbers = [CNLabeledValue(label: "Let Talk", value: CNPhoneNumber(stringValue: phone))]
+        }
+        if !email.isEmpty {
+            contact.emailAddresses = [CNLabeledValue(label: CNLabelHome, value: email as NSString)]
+        }
+        let request = CNSaveRequest()
+        request.add(contact, toContainerWithIdentifier: nil)
+        do {
+            try store.execute(request)
+            return true
+        } catch {
+            debugLog("Saving to iPhone Contacts failed:", error)
+            return false
         }
     }
 }

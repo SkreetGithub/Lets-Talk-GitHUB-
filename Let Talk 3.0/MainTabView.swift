@@ -105,8 +105,9 @@ struct MainTabView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .accentColor(.blue)
+        .tint(settingsManager.settings.theme.accent)
         .onAppear {
+            settingsManager.applyTheme(settingsManager.settings.theme)
             tabViewModel.setupUserPresence()
             setupInitialState()
         }
@@ -278,6 +279,13 @@ struct TabButton: View {
     var namespace: Namespace.ID
     /// Bumped each time this tab becomes the selected one, which bounces its icon.
     @State private var bounceCount = 0
+    @ObservedObject private var settings = SettingsManager.shared
+
+    /// Color themes (Ocean, Sunset…) color every tab with the theme; Light/Dark/System keep
+    /// each tab's own color.
+    private var tint: Color {
+        settings.settings.theme.isGradient ? settings.settings.theme.accent : tab.color
+    }
     
     var body: some View {
         Button(action: { 
@@ -302,13 +310,13 @@ struct TabButton: View {
                         RoundedRectangle(cornerRadius: 20)
                             .fill(
                                 LinearGradient(
-                                    gradient: Gradient(colors: [tab.color, tab.color.opacity(0.8)]),
+                                    gradient: Gradient(colors: [tint, tint.opacity(0.8)]),
                                     startPoint: .leading,
                                     endPoint: .trailing
                                 )
                             )
                             .matchedGeometryEffect(id: "tab", in: namespace)
-                            .shadow(color: tab.color.opacity(0.3), radius: 8, x: 0, y: 4)
+                            .shadow(color: tint.opacity(0.3), radius: 8, x: 0, y: 4)
                     }
                 }
             )

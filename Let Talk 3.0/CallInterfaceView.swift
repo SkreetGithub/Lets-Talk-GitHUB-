@@ -84,13 +84,13 @@ struct CallInterfaceView: View {
         ZStack {
             // Remote video (full screen). Voice calls, and video calls that are still connecting,
             // show the moving background instead of a black screen.
-            if call.isVideo && callManager.isInCall && (callManager.connectionState == .connected || callManager.connectionState == .completed) {
+            if callManager.isRemoteVideoOn && callManager.isInCall && (callManager.connectionState == .connected || callManager.connectionState == .completed) {
                 RemoteVideoView(remoteVideoView: $remoteVideoView)
                     .ignoresSafeArea()
             }
             
             // Local video (picture-in-picture)
-            if call.isVideo && callManager.isVideoEnabled {
+            if callManager.isVideoEnabled {
                 // Anchored top-right BELOW the name/status row (it used to sit on top of the
                 // connection indicator and translation chip at a fixed screen position).
                 LocalVideoView(localVideoView: $localVideoView)
@@ -122,7 +122,7 @@ struct CallInterfaceView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                     
-                    Text(call.isVideo ? "Video Call" : "Voice Call")
+                    Text(isVideoNow ? "Video Call" : "Voice Call")
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.8))
                     
@@ -168,15 +168,15 @@ struct CallInterfaceView: View {
                     )
                     .frame(maxWidth: .infinity)   // equal share of the row: evenly spaced
                     
-                    if call.isVideo {
-                        CallControlButton(
-                            icon: callManager.isVideoEnabled ? "video.fill" : "video.slash.fill",
-                            color: .white,
-                            backgroundColor: callManager.isVideoEnabled ? .white.opacity(0.2) : .red,
-                            action: { callManager.toggleVideo() }
-                        )
+                    // Camera on/off — also switches a voice call to video and back.
+                    CallControlButton(
+                        icon: callManager.isVideoEnabled ? "video.fill" : "video",
+                        color: .white,
+                        backgroundColor: callManager.isVideoEnabled ? .blue : .white.opacity(0.2),
+                        action: { callManager.toggleVideo() }
+                    )
+                    .accessibilityLabel(callManager.isVideoEnabled ? "Turn camera off" : "Switch to video")
                     .frame(maxWidth: .infinity)   // equal share of the row: evenly spaced
-                    }
                     
                     CallControlButton(
                         icon: callManager.isSpeakerEnabled ? "speaker.wave.3.fill" : "speaker.fill",
@@ -186,7 +186,7 @@ struct CallInterfaceView: View {
                     )
                     .frame(maxWidth: .infinity)   // equal share of the row: evenly spaced
                     
-                    if call.isVideo {
+                    if callManager.isVideoEnabled {
                         CallControlButton(
                             icon: "camera.rotate.fill",
                             color: .white,
@@ -245,7 +245,7 @@ struct CallInterfaceView: View {
     
     /// The remote video fills the screen once a video call connects; otherwise show the avatar.
     private var showsRemoteVideo: Bool {
-        call.isVideo && callManager.isInCall
+        callManager.isRemoteVideoOn && callManager.isInCall
             && (callManager.connectionState == .connected || callManager.connectionState == .completed)
     }
     
@@ -302,6 +302,9 @@ struct CallInterfaceView: View {
     }
     
     // MARK: - Computed Properties
+
+    /// Either camera is on (the call started as video, or someone switched to video).
+    private var isVideoNow: Bool { callManager.isVideoEnabled || callManager.isRemoteVideoOn }
     
     private var statusText: String {
         switch callManager.callStatus {

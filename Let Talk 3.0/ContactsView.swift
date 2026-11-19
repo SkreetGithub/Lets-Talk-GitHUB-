@@ -302,24 +302,24 @@ struct AddContactView: View {
     var body: some View {
         NavigationView {
             Form {
+                // Three ways to add someone, biggest first.
                 Section {
-                    Button {
-                        showContactSync = true
-                    } label: {
-                        Label("Find Friends from Contacts", systemImage: "person.2.circle")
+                    Button { showQRScanner = true } label: {
+                        addOption(icon: "qrcode.viewfinder", color: .blue, title: "Scan QR Code",
+                                  detail: "Adds their photo, Let Talk number and email in one step")
                     }
-                    Button {
-                        showQRScanner = true
-                    } label: {
-                        Label("Scan QR Code", systemImage: "qrcode.viewfinder")
+                    Button { showContactSync = true } label: {
+                        addOption(icon: "person.crop.circle.badge.plus", color: .green, title: "From My iPhone Contacts",
+                                  detail: "See which of your contacts use Let Talk, add them with one tap")
                     }
                 } footer: {
-                    Text("See which of your contacts use Let Talk, or add someone instantly by scanning their code (Settings → My QR Code).")
+                    Text("Your own QR code is in Settings → My QR Code.")
                 }
 
-                Section("Contact Information") {
+                Section("Or Enter Manually") {
                     TextField("Name", text: $name)
-                    
+                        .textContentType(.name)
+
                     HStack {
                         Picker("Country", selection: $selectedCountryCode) {
                             ForEach(countryCodes, id: \.self) { code in
@@ -327,14 +327,17 @@ struct AddContactView: View {
                             }
                         }
                         .pickerStyle(MenuPickerStyle())
+                        .labelsHidden()
                         .frame(width: 80)
-                        
-                        TextField("Phone Number", text: $phone)
+
+                        TextField("Let Talk Number", text: $phone)
                             .keyboardType(.phonePad)
+                            .textContentType(.telephoneNumber)
                     }
-                    
-                    TextField("Email", text: $email)
+
+                    TextField("Email (optional)", text: $email)
                         .keyboardType(.emailAddress)
+                        .textContentType(.emailAddress)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
@@ -378,6 +381,26 @@ struct AddContactView: View {
                 Text(viewModel.errorMessage ?? "")
             }
         }
+    }
+}
+
+extension AddContactView {
+    fileprivate func addOption(icon: String, color: Color, title: String, detail: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(color))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.headline).foregroundStyle(.primary)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
 }
 

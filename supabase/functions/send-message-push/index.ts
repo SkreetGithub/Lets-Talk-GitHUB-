@@ -61,8 +61,23 @@ Deno.serve(async (req) => {
     const key = await importPKCS8(apns.p8, "ES256");
     const jwt = await new SignJWT({}).setProtectedHeader({ alg: "ES256", kid: apns.keyId })
       .setIssuer(apns.teamId).setIssuedAt().sign(key);
-    const host = apns.env === "production" ? "api.push.apple.com" : "api.sandbox.push.apple.com";
-    const r = await fetch(`https://${host}/3/device/${tok.token}`, {
+    // Production token (TestFlight/App Store) or sandbox token (Xcode build): try the configured
+    // APNs server first, then the other one if Apple says the token belongs there.
+    const primary = apns.env === "production" ? "api.push.apple.com" : "api.sandbox.push.apple.com";
+    const other = primary === "api.push.apple.com" ? "api.sandbox.push.apple.com" : "api.push.apple.com";
+    const payload = JSON.stringify({
+      aps: {
+        alert: { title: sender?.name || "New message", body },
+        sound: "default",
+        "thread-id": message.chat_id,
+        "mutable-content": 1,
+      },
+      type: "message",
+      chat_id: message.chat_id,
+      sender_id: user.id,
+      message_id: message.id,
+    });
+    const send = (host: string) => fetch(`https://${host}/3/device/${tok.token}`, {
       method: "POST",
       headers: {
         authorization: `bearer ${jwt}`,
@@ -71,18 +86,15 @@ Deno.serve(async (req) => {
         "apns-priority": "10",
         "apns-collapse-id": String(message.id).slice(0, 64),
       },
-      body: JSON.stringify({
-        aps: {
-          alert: { title: sender?.name || "New message", body },
-          sound: "default",
-          "thread-id": message.chat_id,
-        },
-        type: "message",
-        chat_id: message.chat_id,
-        sender_id: user.id,
-        message_id: message.id,
-      }),
+      body: payload,
     });
+    let r = await send(primary);
+    let reason = r.ok ? "" : await r.text();
+    if (r.status === 400 && reason.includes("BadDeviceToken")) {
+      r = await send(other);
+      reason = r.ok ? "" : await r.text();
+    }
+    console.log(`message push receiver=${message.receiver_id} status=${r.status} ${reason}`);
     if (r.status === 410) {
       // The receiver's token is no longer valid (app deleted / notifications reset).
       await admin.from("push_tokens").delete().eq("user_id", message.receiver_id).eq("kind", "apns");

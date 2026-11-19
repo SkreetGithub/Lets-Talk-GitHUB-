@@ -1,6 +1,7 @@
 import Foundation
 import WebRTC
 import AVFoundation
+import UIKit
 
 // MARK: - WebRTC Call Manager
 //
@@ -14,11 +15,19 @@ final class WebRTCCallManager: NSObject, ObservableObject {
     static let shared = WebRTCCallManager()
 
     @Published var isInCall = false
-    @Published var isVideoEnabled = true
+    @Published var isVideoEnabled = true {
+        didSet { updateProximitySensor() }
+    }
     @Published var isAudioEnabled = true
-    @Published var isSpeakerEnabled = false
-    @Published var callStatus: WebRTCCallStatus = .idle
+    @Published var isSpeakerEnabled = false {
+        didSet { updateProximitySensor() }
+    }
+    @Published var callStatus: WebRTCCallStatus = .idle {
+        didSet { updateProximitySensor() }
+    }
     @Published var currentCall: Call?
+    /// The other person's camera is on (they started a video call or switched to video).
+    @Published var isRemoteVideoOn = false
     @Published var connectionState: RTCIceConnectionState = .new
 
     /// How long an outgoing call rings before it is marked missed, and how long an incoming call
@@ -51,9 +60,11 @@ final class WebRTCCallManager: NSObject, ObservableObject {
 
     private let factory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
+        // The app's own audio device: one microphone feed shared by the call and live translation.
         return RTCPeerConnectionFactory(
             encoderFactory: RTCDefaultVideoEncoderFactory(),
-            decoderFactory: RTCDefaultVideoDecoderFactory()
+            decoderFactory: RTCDefaultVideoDecoderFactory(),
+            audioDevice: CallAudioDevice.shared
         )
     }()
 
@@ -86,6 +97,7 @@ final class WebRTCCallManager: NSObject, ObservableObject {
             resetCallState()
             isInCall = true
             isVideoEnabled = isVideo
+            isRemoteVideoOn = isVideo
             isSpeakerEnabled = isVideo          // video calls default to speaker, voice to earpiece
             callStatus = .initiating
         }
@@ -128,6 +140,7 @@ final class WebRTCCallManager: NSObject, ObservableObject {
         await MainActor.run {
             isInCall = true
             isVideoEnabled = isVideo
+            isRemoteVideoOn = isVideo
             isSpeakerEnabled = isVideo
             callStatus = .answering
             if currentCall?.id != callId {
@@ -200,16 +213,63 @@ final class WebRTCCallManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Proximity (screen off at your ear)
+
+    /// Voice call held to the ear: turn the screen off so your cheek can't tap End or Mute
+    /// (the Phone app does the same). Off for video, speaker, and when no call is active.
+    private func updateProximitySensor() {
+        let active: Bool
+        switch callStatus {
+        case .initiating, .answering, .connecting, .connected, .disconnected: active = true
+        default: active = false
+        }
+        let enable = active && !isVideoEnabled && !isSpeakerEnabled
+        DispatchQueue.main.async {
+            if UIDevice.current.isProximityMonitoringEnabled != enable {
+                UIDevice.current.isProximityMonitoringEnabled = enable
+            }
+        }
+    }
+
     // MARK: - Media Controls
 
     func toggleVideo() {
-        isVideoEnabled.toggle()
-        localVideoTrack?.isEnabled = isVideoEnabled
-        if isVideoEnabled {
+        setVideo(!isVideoEnabled)
+    }
+
+    /// Voice <-> video in the middle of a call. Every call carries a camera track that starts
+    /// switched off on voice calls, so turning the camera on needs no renegotiation: the
+    /// track is enabled, the camera starts, and the other phone is told over the data channel.
+    func setVideo(_ on: Bool) {
+        isVideoEnabled = on
+        localVideoTrack?.isEnabled = on
+        if on {
             startVideoCapture()
+            if !isSpeakerEnabled { isSpeakerEnabled = true; setSpeaker(true) }
         } else {
             videoCapturer?.stopCapture()
+            if !isRemoteVideoOn, isSpeakerEnabled, !SettingsManager.shared.settings.audio.speakerMode {
+                isSpeakerEnabled = false; setSpeaker(false)
+            }
         }
+        sendVideoState()
+    }
+
+    private func sendVideoState() {
+        let packet = ["type": "video", "on": isVideoEnabled ? "1" : "0"]
+        if let data = try? JSONSerialization.data(withJSONObject: packet) { sendData(data) }
+    }
+
+    /// The other phone turned its camera on or off.
+    private func handleVideoPacket(_ data: Data) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+              object["type"] == "video" else { return false }
+        let on = object["on"] == "1"
+        DispatchQueue.main.async {
+            self.isRemoteVideoOn = on
+            if on, !self.isSpeakerEnabled { self.isSpeakerEnabled = true; self.setSpeaker(true) }
+        }
+        return true
     }
 
     func toggleAudio() {
@@ -294,13 +354,15 @@ final class WebRTCCallManager: NSObject, ObservableObject {
         localAudioTrack = audioTrack
         peerConnection?.add(audioTrack, streamIds: ["stream0"])
 
-        guard isVideo else { return }
+        // A camera track on every call (off for voice calls) so either person can switch to
+        // video later without renegotiating the call.
         let videoSource = factory.videoSource()
         videoCapturer = RTCCameraVideoCapturer(delegate: videoSource)
         let videoTrack = factory.videoTrack(with: videoSource, trackId: "video0")
+        videoTrack.isEnabled = isVideo
         localVideoTrack = videoTrack
         peerConnection?.add(videoTrack, streamIds: ["stream0"])
-        startVideoCapture()   // no-op on the Simulator (no camera)
+        if isVideo { startVideoCapture() }   // no-op on the Simulator (no camera)
 
         DispatchQueue.main.async {
             if let renderer = self.localRenderer { videoTrack.add(renderer) }
@@ -385,6 +447,7 @@ final class WebRTCCallManager: NSObject, ObservableObject {
         remoteVideoTrack = nil
         connectionState = .new
         isAudioEnabled = true
+        isRemoteVideoOn = false
         usingFrontCamera = true
     }
 
@@ -547,6 +610,9 @@ extension WebRTCCallManager: RTCPeerConnectionDelegate {
         // The callee receives the subtitle channel the caller created.
         dataChannel.delegate = self
         self.dataChannel = dataChannel
+        if dataChannel.readyState == .open {
+            DispatchQueue.main.async { self.sendVideoState() }
+        }
     }
 }
 
@@ -555,10 +621,15 @@ extension WebRTCCallManager: RTCPeerConnectionDelegate {
 extension WebRTCCallManager: RTCDataChannelDelegate {
     func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {
         debugLog("Data channel state changed: \(dataChannel.readyState.rawValue)")
+        // Tell the other phone whether my camera is on as soon as we can talk.
+        if dataChannel.readyState == .open {
+            DispatchQueue.main.async { self.sendVideoState() }
+        }
     }
 
     func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
         let data = buffer.data
+        if handleVideoPacket(data) { return }
         Task { @MainActor in
             LiveTranslationSession.shared.handleIncoming(data)
         }

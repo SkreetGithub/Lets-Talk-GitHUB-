@@ -70,6 +70,29 @@ final class CallKitManager: NSObject, ObservableObject {
         provider.reportNewIncomingCall(with: uuid, update: update) { [weak self] error in
             if error != nil { self?.callIds[uuid] = nil }
             completion?(error)
+            if error == nil { self?.stopRingingWhenCallerHangsUp(uuid: uuid, callId: callId) }
+        }
+    }
+
+    /// While the iPhone's call screen is ringing, check the call every 2 s; if the caller hung
+    /// up (or it timed out), stop ringing instead of ringing for a call that's gone.
+    private func stopRingingWhenCallerHangsUp(uuid: UUID, callId: String) {
+        Task { [weak self] in
+            for _ in 0..<25 {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let self, self.callIds[uuid] != nil else { return }
+                // Answered on this phone: the call screen takes over.
+                if WebRTCCallManager.shared.isInCall { return }
+                guard let status = await SupabaseSignalingService.shared.fetchCallStatus(callId: callId) else { continue }
+                switch status {
+                case .ended, .missed, .rejected:
+                    self.callIds[uuid] = nil
+                    self.provider.reportCall(with: uuid, endedAt: nil, reason: .remoteEnded)
+                    return
+                default:
+                    continue
+                }
+            }
         }
     }
 
@@ -148,6 +171,8 @@ extension CallKitManager: CXProviderDelegate {
         action.fulfill()
     }
 
-    func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {}
+    func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+        CallAudioDevice.shared.audioSessionDidActivate()
+    }
     func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {}
 }

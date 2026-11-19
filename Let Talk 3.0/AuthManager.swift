@@ -202,6 +202,27 @@ final class AuthManager: ObservableObject {
         }
     }
 
+    /// Settings › My Let Talk Number › Change. The database allows one change a year
+    /// (see supabase_migration_v9_number_rules.sql) and refuses numbers someone else has.
+    func changeNumber(to phoneNumber: String) async throws {
+        guard let userId = currentUserId else { throw AuthError.userNotFound }
+        try await updateProfileFields(userId: userId, fields: ["phone": .string(phoneNumber)])
+        await fetchUserProfile(userId: userId)
+    }
+
+    /// When the number was last picked or changed, and when it can next be changed.
+    func numberChangeDates() async -> (lastChanged: Date?, nextChange: Date?) {
+        guard let userId = currentUserId else { return (nil, nil) }
+        struct Row: Decodable { let phone_changed_at: String? }
+        guard let response = try? await client.from("profiles").select("phone_changed_at")
+                .eq("id", value: userId).limit(1).execute(),
+              let row = try? JSONDecoder().decode([Row].self, from: response.data).first,
+              let raw = row.phone_changed_at,
+              let last = PostgresDate.parse(raw) else { return (nil, nil) }
+        let next = Calendar.current.date(byAdding: .day, value: 365, to: last)
+        return (last, next.flatMap { $0 > Date() ? $0 : nil })
+    }
+
     func signOut() async throws {
         do {
             try await client.auth.signOut()

@@ -39,15 +39,28 @@ Deno.serve(async (req) => {
   const key = await importPKCS8(p8, "ES256");
   const jwt = await new SignJWT({}).setProtectedHeader({ alg: "ES256", kid: Deno.env.get("APNS_KEY_ID")! })
     .setIssuer(Deno.env.get("APNS_TEAM_ID")!).setIssuedAt().sign(key);
-  const host = Deno.env.get("APNS_ENV") === "production" ? "api.push.apple.com" : "api.sandbox.push.apple.com";
-  const r = await fetch(`https://${host}/3/device/${tok.token}`, {
+  // A TestFlight/App Store build has a production token, an Xcode build a sandbox one. Try the
+  // configured server first and, if Apple says the token belongs to the other one, retry there.
+  const primary = Deno.env.get("APNS_ENV") === "production" ? "api.push.apple.com" : "api.sandbox.push.apple.com";
+  const other = primary === "api.push.apple.com" ? "api.sandbox.push.apple.com" : "api.push.apple.com";
+  const send = (host: string) => fetch(`https://${host}/3/device/${tok.token}`, {
     method: "POST",
     headers: {
       authorization: `bearer ${jwt}`,
       "apns-topic": `${Deno.env.get("APNS_BUNDLE_ID")}.voip`,
-      "apns-push-type": "voip", "apns-priority": "10",
+      "apns-push-type": "voip", "apns-priority": "10", "apns-expiration": "0",
     },
     body: JSON.stringify({ caller_id: user.id, caller_name, call_id, video: !!video }),
   });
+  let r = await send(primary);
+  let reason = r.ok ? "" : await r.text();
+  if (r.status === 400 && reason.includes("BadDeviceToken")) {
+    r = await send(other);
+    reason = r.ok ? "" : await r.text();
+  }
+  console.log(`voip push callee=${callee_id} status=${r.status} ${reason}`);
+  if (r.status === 410) {
+    await admin.from("push_tokens").delete().eq("user_id", callee_id).eq("kind", "voip");
+  }
   return new Response(JSON.stringify({ sent: r.ok, status: r.status }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 });

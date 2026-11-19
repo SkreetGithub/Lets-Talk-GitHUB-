@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The ONE sign-in / sign-up screen. Sign-up asks for name, phone, email and password
-/// (the phone number is needed for calling). Onboarding opens it in sign-up mode.
+/// The ONE sign-in / sign-up screen. Sign-up asks for name, voice, email and password; step 2
+/// is picking your Let Talk number (the same number screen as Google / Apple sign-in).
+/// Onboarding opens it in sign-up mode.
 ///
 /// Navigation after auth is owned by the app root (`Let_Talk_3_0App` swaps to MainTabView
 /// when `isAuthenticated` turns true), so this screen never presents MainTabView itself.
@@ -14,7 +15,6 @@ struct EnhancedAuthView: View {
     @State private var password = ""
     @State private var confirmPassword = ""
     @State private var name = ""
-    @State private var phone = ""
     @State private var gender: VoiceGender?
     @State private var isLoading = false
     @State private var errorMessage = ""
@@ -70,11 +70,6 @@ struct EnhancedAuthView: View {
                         if !isLoginMode {
                             CustomTextField(text: $name, placeholder: "Full Name", icon: "person.fill")
                                 .textContentType(.name)
-                                .transition(.move(edge: .top).combined(with: .opacity))
-
-                            CustomTextField(text: $phone, placeholder: "Phone Number", icon: "phone.fill",
-                                            keyboardType: .phonePad)
-                                .textContentType(.telephoneNumber)
                                 .transition(.move(edge: .top).combined(with: .opacity))
 
                             voicePicker
@@ -214,13 +209,12 @@ struct EnhancedAuthView: View {
     private var signUpProgress: Double {
         let filled = [
             !name.trimmingCharacters(in: .whitespaces).isEmpty,
-            !phone.trimmingCharacters(in: .whitespaces).isEmpty,
             gender != nil,
             !email.trimmingCharacters(in: .whitespaces).isEmpty,
             !password.isEmpty,
             !confirmPassword.isEmpty
         ].filter { $0 }.count
-        return 0.08 + 0.42 * Double(filled) / 6.0
+        return 0.08 + 0.42 * Double(filled) / 5.0
     }
 
     /// Male / Female choice for the voice other people hear when this user's speech is
@@ -303,7 +297,7 @@ struct EnhancedAuthView: View {
                         email: email.trimmingCharacters(in: .whitespaces),
                         password: password,
                         name: name.trimmingCharacters(in: .whitespaces),
-                        phone: normalizedPhone,
+                        phone: "",            // picked on the next screen (your Let Talk number)
                         gender: gender
                     )
                     await MainActor.run {
@@ -356,13 +350,6 @@ struct EnhancedAuthView: View {
         }
     }
 
-    /// Digits only, keeping a leading "+" for international numbers.
-    private var normalizedPhone: String {
-        let trimmed = phone.trimmingCharacters(in: .whitespaces)
-        let digits = trimmed.filter(\.isNumber)
-        return trimmed.hasPrefix("+") ? "+" + digits : digits
-    }
-
     private func validateInputs() -> Bool {
         if email.isEmpty || password.isEmpty {
             errorMessage = "Please fill in all required fields."
@@ -375,11 +362,6 @@ struct EnhancedAuthView: View {
         if !isLoginMode {
             if name.trimmingCharacters(in: .whitespaces).isEmpty {
                 errorMessage = "Please enter your name."
-                return false
-            }
-            let digitCount = normalizedPhone.filter(\.isNumber).count
-            if digitCount < 10 || digitCount > 15 {
-                errorMessage = "Please enter a valid phone number."
                 return false
             }
             if gender == nil {

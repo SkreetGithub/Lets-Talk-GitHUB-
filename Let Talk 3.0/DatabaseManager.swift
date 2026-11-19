@@ -234,6 +234,35 @@ final class DatabaseManager: ObservableObject {
         return rows.first { ($0.phone ?? "").filter(\.isNumber).hasSuffix(last10) }?.id ?? rows.first?.id
     }
 
+    /// Finds the Let Talk user with this email address (case-insensitive), or nil.
+    func findUserId(byEmail raw: String) async throws -> String? {
+        let email = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard email.contains("@"), email.contains(".") else { return nil }
+        let response = try await client.from("profiles")
+            .select("id")
+            .ilike("email", pattern: email)
+            .limit(1)
+            .execute()
+        struct Row: Decodable { let id: String }
+        return try decoder.decode([Row].self, from: response.data).first?.id
+    }
+
+    /// New Message › typed number or email: opens (creating if needed) the chat with whoever
+    /// owns it. Throws `notOnLetTalk` when nobody does.
+    func openChat(withNumberOrEmail query: String) async throws -> Chat {
+        guard let me = AuthManager.shared.currentUserId?.lowercased() else { throw ChatError.notSignedIn }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let otherUserId: String?
+        if trimmed.contains("@") {
+            otherUserId = try await findUserId(byEmail: trimmed)
+        } else {
+            otherUserId = try await findUserId(byPhone: trimmed)
+        }
+        guard let other = otherUserId?.lowercased() else { throw ChatError.notOnLetTalk(trimmed) }
+        guard other != me else { throw ChatError.ownAccount }
+        return try await createOrUpdateChat(senderId: me, receiverId: other)
+    }
+
     func searchUsers(query: String) async throws -> [User] {
         let response = try await client.from("profiles")
             .select()
