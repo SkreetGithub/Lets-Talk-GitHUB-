@@ -60,11 +60,11 @@ final class WebRTCCallManager: NSObject, ObservableObject {
 
     private let factory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
-        // The app's own audio device: one microphone feed shared by the call and live translation.
+        // WebRTC's own audio (the custom CallAudioDevice broke call audio in testing; it's kept in
+        // the project but not used). Live translation listens with its own microphone tap.
         return RTCPeerConnectionFactory(
             encoderFactory: RTCDefaultVideoEncoderFactory(),
-            decoderFactory: RTCDefaultVideoDecoderFactory(),
-            audioDevice: CallAudioDevice.shared
+            decoderFactory: RTCDefaultVideoDecoderFactory()
         )
     }()
 
@@ -547,6 +547,11 @@ final class WebRTCCallManager: NSObject, ObservableObject {
     }
 
     // MARK: - Remote media
+
+    /// Turns the other person's real voice down (0.25) while their translation plays, then back to 1.
+    func setRemoteVoiceVolume(_ volume: Double) {
+        DispatchQueue.main.async { self.remoteAudioTrack?.source.volume = volume }
+    }
 
     private func attachRemoteVideo(_ track: RTCVideoTrack) {
         DispatchQueue.main.async {

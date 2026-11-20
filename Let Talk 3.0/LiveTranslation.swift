@@ -100,7 +100,7 @@ final class LiveTranslationSession: ObservableObject {
         synthesizer.stopSpeaking(at: .immediate)
         TranslatedVoicePlayer.shared.stop()
         unduckTask?.cancel()
-        CallAudioDevice.shared.remoteVolume = 1
+        WebRTCCallManager.shared.setRemoteVoiceVolume(1)
         peerVoiceId = nil
         mySpeech = ""
         subtitle = ""
@@ -290,12 +290,12 @@ final class LiveTranslationSession: ObservableObject {
     /// Turns the other person's real voice down while their translation plays, so the
     /// translation is what you hear; it comes back up when the translation ends.
     private func duckOriginalVoice(for seconds: Double) {
-        CallAudioDevice.shared.remoteVolume = 0.2
+        WebRTCCallManager.shared.setRemoteVoiceVolume(0.25)
         unduckTask?.cancel()
         unduckTask = Task {
             try? await Task.sleep(nanoseconds: UInt64(max(0.5, seconds) * 1_000_000_000))
             guard !Task.isCancelled else { return }
-            CallAudioDevice.shared.remoteVolume = 1
+            WebRTCCallManager.shared.setRemoteVoiceVolume(1)
         }
     }
 

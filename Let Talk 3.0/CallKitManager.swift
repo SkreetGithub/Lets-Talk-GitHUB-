@@ -171,8 +171,6 @@ extension CallKitManager: CXProviderDelegate {
         action.fulfill()
     }
 
-    func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
-        CallAudioDevice.shared.audioSessionDidActivate()
-    }
+    func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {}
     func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {}
 }

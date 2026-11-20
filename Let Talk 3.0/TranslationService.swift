@@ -222,8 +222,6 @@ class SpeechRecognizer {
     private var speechRecognizer: SFSpeechRecognizer?
     private var audioSession: AVAudioSession?
     private var completion: ((Result<String, Error>) -> Void)?
-    /// True while listening to the call's microphone feed instead of our own engine.
-    private var usingCallAudio = false
     /// Bumped for every new listening session. A cancelled session's late callbacks carry an old
     /// number and are ignored — before, each cancelled session reported an error that restarted
     /// listening AND stopped the new session, so a call's recognizer kept killing itself and
@@ -277,37 +275,6 @@ class SpeechRecognizer {
             return
         }
         
-        // During a call the microphone belongs to the call (CallAudioDevice). Listen to the same
-        // feed instead of opening a second engine, which only ever got a dead 0 Hz input.
-        if WebRTCCallManager.shared.isInCall {
-            audioSession = nil
-            let request = SFSpeechAudioBufferRecognitionRequest()
-            request.shouldReportPartialResults = true
-            recognitionRequest = request
-            recognitionTask = speechRecognizer.recognitionTask(with: request) { [weak self] result, error in
-                DispatchQueue.main.async {
-                    guard let self, gen == self.generation else { return }   // a cancelled session
-                    if let error = error {
-                        self.stopRecording()
-                        completion(.failure(error))
-                        return
-                    }
-                    guard let result = result else { return }
-                    completion(.success(result.bestTranscription.formattedString))
-                    if result.isFinal {
-                        self.stopRecording()
-                        // Keep a call's translation listening after each finished sentence.
-                        completion(.failure(SpeechRecognitionError.finished))
-                    }
-                }
-            }
-            CallAudioDevice.shared.onMicrophoneBuffer = { [weak request] buffer in
-                request?.append(buffer)
-            }
-            usingCallAudio = true
-            return
-        }
-
         // Setup audio session. During a call WebRTC already owns a .playAndRecord/.voiceChat session:
         // leave it alone (switching mode/route here broke the call's audio). Only configure it when
         // nothing else has.
@@ -364,8 +331,9 @@ class SpeechRecognizer {
         // With the mic held by the call, the input format can come back as 0 Hz / 0 channels.
         // installTap with that format raises an Objective-C exception and kills the app (the crash
         // seen when a call connected), so fail softly instead.
+        debugLog("[LT] translator mic format: \(recordingFormat)")
         guard recordingFormat.sampleRate > 0, recordingFormat.channelCount > 0 else {
-            self.recognitionTask?.cancel()
+            stopRecording()
             self.recognitionTask = nil
             self.recognitionRequest = nil
             self.audioEngine = nil
@@ -375,13 +343,18 @@ class SpeechRecognizer {
             return
         }
         
+        var tapped = 0
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+            tapped += 1
+            if tapped == 1 || tapped % 400 == 0 { debugLog("[LT] translator mic buffers: \(tapped)") }
             self?.recognitionRequest?.append(buffer)
         }
         
         do {
             try audioEngine?.start()
+            debugLog("[LT] translator mic started")
         } catch {
+            debugLog("[LT] translator mic failed to start: \(error)")
             Task { @MainActor in
                 completion(.failure(error))
             }
@@ -391,10 +364,6 @@ class SpeechRecognizer {
     
     func stopRecording() {
         generation += 1          // anything the stopped session reports later is ignored
-        if usingCallAudio {
-            CallAudioDevice.shared.onMicrophoneBuffer = nil
-            usingCallAudio = false
-        }
         // Stop audio engine safely
         if let audioEngine = audioEngine {
             if audioEngine.isRunning { audioEngine.stop() }
