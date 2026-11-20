@@ -171,16 +171,14 @@ struct CallsView: View {
         }
     }
     
+    /// "Today" / "Yesterday" / "November 18, 2026" in the app's language ("Hoy", "Ayer", …).
     private func formatDate(_ date: Date) -> String {
-        if Calendar.current.isDateInToday(date) {
-            return "Today"
-        } else if Calendar.current.isDateInYesterday(date) {
-            return "Yesterday"
-        } else {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "MMMM d, yyyy"
-            return formatter.string(from: date)
-        }
+        let formatter = DateFormatter()
+        formatter.locale = AppLanguage.locale
+        formatter.dateStyle = .long
+        formatter.timeStyle = .none
+        formatter.doesRelativeDateFormatting = true
+        return formatter.string(from: date)
     }
 }
 
