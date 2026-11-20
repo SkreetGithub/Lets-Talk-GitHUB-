@@ -32,8 +32,8 @@ struct ProfessionalTranslatorView: View {
                 VStack(spacing: DS.spacingL) {
                     // Professional Header
                     UnifiedHeader(
-                        title: "AI Translator",
-                        subtitle: "Professional Translation Suite",
+                        title: "Translator",
+                        subtitle: "Two languages. One conversation.",
                         isTranslating: viewModel.isTranslating,
                         sourceLanguage: viewModel.sourceLanguage,
                         targetLanguage: viewModel.targetLanguage,
@@ -60,7 +60,7 @@ struct ProfessionalTranslatorView: View {
                     // Translation Input Card
                     UnifiedTextInputCard(
                         text: $viewModel.sourceText,
-                        placeholder: "Enter text",
+                        placeholder: "Text in your language",
                         isProcessing: viewModel.isProcessingImage,
                         onClear: viewModel.clearSourceText
                     )

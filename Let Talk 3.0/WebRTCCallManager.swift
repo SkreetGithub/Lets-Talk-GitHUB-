@@ -161,6 +161,9 @@ final class WebRTCCallManager: NSObject, ObservableObject {
         do {
             try await signalingService.answerCall(callId: callId, isVideo: isVideo)
             signalingService.listenForSignalingMessages(callId: callId)
+            // Watch the call row so this phone hangs up when the caller does. A call answered
+            // from the lock screen never started this watch, so it stayed connected forever.
+            signalingService.watchCall(callId: callId)
             await MainActor.run {
                 // "Connected" is only shown once ICE actually connects (it used to be set here).
                 if callStatus == .answering { callStatus = .connecting }
@@ -194,7 +197,10 @@ final class WebRTCCallManager: NSObject, ObservableObject {
     /// "Call ended" / "Call failed" before it closes.
     private func finish(_ status: WebRTCCallStatus) async {
         cancelTimeout()
-        if let id = activeCallId { signalingService.stopListening(callId: id) }
+        if let id = activeCallId {
+            signalingService.stopListening(callId: id)
+            CallKitManager.shared.reportEnded(callId: id)   // close the iPhone's call UI too
+        }
         cleanup()
         deactivateAudioSession()
 

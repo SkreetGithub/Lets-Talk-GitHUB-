@@ -96,6 +96,18 @@ final class CallKitManager: NSObject, ObservableObject {
         }
     }
 
+    /// The call is over in the app (either side hung up, declined, missed or failed): close the
+    /// iPhone's own call UI too. Before, a call answered from the lock screen stayed "active" on
+    /// the iPhone (green bar / call screen) after hanging up, and an unanswered call kept ringing
+    /// after the caller's side had already given up.
+    func reportEnded(callId: String) {
+        DispatchQueue.main.async {
+            guard let entry = self.callIds.first(where: { $0.value.callId == callId }) else { return }
+            self.callIds[entry.key] = nil
+            self.provider.reportCall(with: entry.key, endedAt: nil, reason: .remoteEnded)
+        }
+    }
+
     func endCall(callId: String) {
         guard let entry = callIds.first(where: { $0.value.callId == callId }) else { return }
         let action = CXEndCallAction(call: entry.key)

@@ -163,17 +163,19 @@ final class LiveTranslationSession: ObservableObject {
                     // The recognizer ends after silence/final result; restart while the call is active.
                     // Permission or microphone failures won't fix themselves, so back off instead of
                     // retrying every 0.4 s forever.
-                    let hardFailure = (error as? SpeechRecognitionError).map {
-                        $0 == .notAuthorized || $0 == .audioEngineError
-                    } ?? false
-                    if hardFailure {
+                    let notAllowed = (error as? SpeechRecognitionError) == .notAuthorized
+                    // The microphone can be briefly unavailable while the call sets up its audio
+                    // (the Simulator often reports 0 Hz): keep retrying quietly every few seconds
+                    // instead of giving up after 3 tries. Only a refused permission stops it.
+                    let micBusy = (error as? SpeechRecognitionError) == .audioEngineError
+                    if notAllowed {
                         self.consecutiveFailures += 1
                         if self.consecutiveFailures >= 3 {
-                            self.errorMessage = "Live translation couldn't use the microphone."
+                            self.errorMessage = "Live translation needs microphone and speech recognition access."
                             return
                         }
                     }
-                    try? await Task.sleep(nanoseconds: hardFailure ? 2_000_000_000 : 400_000_000)
+                    try? await Task.sleep(nanoseconds: (notAllowed || micBusy) ? 3_000_000_000 : 400_000_000)
                     if self.isActive && !self.isMuted { self.listen() }
                 }
             }

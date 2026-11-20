@@ -24,7 +24,7 @@ struct UnifiedLanguageButton: View {
             VStack(spacing: DS.spacingXS) {
                 FlagView(flag: language.flag, height: 26)
                 
-                Text(language.name)
+                Text(language.displayName)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.white)
                     .lineLimit(1)
@@ -69,7 +69,7 @@ struct UnifiedTextInputCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text(placeholder)
+                Text(LocalizedStringKey(placeholder))
                     .font(.headline)
                     .foregroundColor(.white)
                     .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
@@ -244,6 +244,15 @@ struct UnifiedTranslateButton: View {
     }
 }
 
+extension UnifiedTranslationLanguage {
+    /// The language's name in the app's language ("Inglés" when the app is in Spanish).
+    var displayName: String {
+        let appLocale = Locale(identifier: AppLanguage.lprojName(for: AppLanguage.current))
+        let base = code.split(separator: "-").first.map(String.init) ?? code
+        return appLocale.localizedString(forLanguageCode: base)?.localizedCapitalized ?? name
+    }
+}
+
 // MARK: - Unified Language Selection Card
 struct UnifiedLanguageSelectionCard: View {
     let sourceLanguage: UnifiedTranslationLanguage
@@ -273,16 +282,11 @@ struct UnifiedLanguageSelectionCard: View {
                 
                 // Swap Button
                 Button(action: onSwapLanguages) {
-                    VStack(spacing: 4) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                        
-                        Text("Swap")
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.8))
-                    }
-                    .frame(width: 60, height: 60)
+                    // Icon only: the word under it wrapped badly in other languages ("Intercam-biar").
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.title3.weight(.semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 48, height: 48)
                     .background(
                         Circle()
                             .fill(.ultraThinMaterial)
@@ -497,7 +501,7 @@ struct UnifiedHeader: View {
                     .accessibilityHidden(true)
                 
                 VStack(alignment: .leading, spacing: DS.spacingXS) {
-                    Text(title)
+                    Text(LocalizedStringKey(title))
                         .font(.largeTitle)
                         .fontWeight(.bold)
                         .foregroundColor(.white)
@@ -505,7 +509,7 @@ struct UnifiedHeader: View {
                         .minimumScaleFactor(0.8)
                         .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
                     
-                    Text(subtitle)
+                    Text(LocalizedStringKey(subtitle))
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.9))
                         .lineLimit(1)
