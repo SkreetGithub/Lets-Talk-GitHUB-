@@ -50,6 +50,8 @@ final class CallAudioDevice: NSObject, RTCAudioDevice {
     private var _isPlaying = false
     private var _isRecording = false
 
+    private var recognizerBuffers = 0
+
     /// Scratch buffer for float -> int16 conversion on the audio thread (sized generously).
     private var int16Scratch = [Int16](repeating: 0, count: 8192)
 
@@ -168,6 +170,7 @@ final class CallAudioDevice: NSObject, RTCAudioDevice {
         }
         let rateChanged = microphoneFormat?.sampleRate != micFormat.sampleRate
         microphoneFormat = micFormat
+        debugLog("[LT] call audio engine mic format: \(micFormat)")
 
         // Microphone -> WebRTC (+ speech recognizer).
         let sink = AVAudioSinkNode { [weak self] timestamp, frameCount, inputData in
@@ -193,7 +196,7 @@ final class CallAudioDevice: NSObject, RTCAudioDevice {
         do {
             try engine.start()
         } catch {
-            debugLog("CallAudioDevice: engine failed to start:", error)
+            debugLog("[LT] call audio engine failed to start:", error)
             return false
         }
         self.engine = engine
@@ -250,6 +253,8 @@ final class CallAudioDevice: NSObject, RTCAudioDevice {
             let step = format.isInterleaved ? Int(format.channelCount) : 1
             for i in 0..<frames { dst[i] = src[i * step] }
             micQueue.async { handler(copy) }
+            recognizerBuffers += 1
+            if recognizerBuffers % 500 == 1 { debugLog("[LT] mic buffers sent to recognizer: \(recognizerBuffers)") }
         }
 
         // 2) Give WebRTC int16 mono (channel 0).

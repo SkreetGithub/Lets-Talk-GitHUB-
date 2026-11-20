@@ -337,7 +337,10 @@ final class WebRTCCallManager: NSObject, ObservableObject {
     }
 
     func sendData(_ data: Data) {
-        guard let channel = dataChannel, channel.readyState == .open else { return }
+        guard let channel = dataChannel, channel.readyState == .open else {
+            debugLog("[LT] data channel not open (\(dataChannel?.readyState.rawValue ?? -1)), dropped a packet")
+            return
+        }
         channel.sendData(RTCDataBuffer(data: data, isBinary: false))
     }
 

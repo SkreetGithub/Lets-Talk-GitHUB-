@@ -72,8 +72,9 @@ final class LiveTranslationSession: ObservableObject {
     // MARK: Lifecycle
 
     func start() {
-        guard !isActive else { return }
-        guard AIConsent.shared.requireConsent() else { return }
+        guard !isActive else { debugLog("[LT] start: already active"); return }
+        guard AIConsent.shared.requireConsent() else { debugLog("[LT] start: waiting for AI consent"); return }
+        debugLog("[LT] start: my language \(myLanguage.code)")
         isActive = true
         isMuted = false
         errorMessage = nil
@@ -145,7 +146,8 @@ final class LiveTranslationSession: ObservableObject {
     // MARK: My speech -> translated -> peer
 
     private func listen() {
-        guard isActive, !isMuted else { return }
+        guard isActive, !isMuted else { debugLog("[LT] listen skipped active=\(isActive) muted=\(isMuted)"); return }
+        debugLog("[LT] listen \(myLanguage.locale)")
         recognizer.startRecording(language: myLanguage.locale) { [weak self] result in
             Task { @MainActor in
                 guard let self, self.isActive else { return }
@@ -153,9 +155,11 @@ final class LiveTranslationSession: ObservableObject {
                 if self.isMuted { self.recognizer.stopRecording(); return }
                 switch result {
                 case .success(let text):
+                    debugLog("[LT] heard: \(text)")
                     self.consecutiveFailures = 0
                     self.handlePartial(text)
                 case .failure(let error):
+                    debugLog("[LT] recognizer ended: \(error)")
                     // The recognizer ends after silence/final result; restart while the call is active.
                     // Permission or microphone failures won't fix themselves, so back off instead of
                     // retrying every 0.4 s forever.
@@ -201,12 +205,14 @@ final class LiveTranslationSession: ObservableObject {
         }
         lastSent = text
         guard !chunk.isEmpty, let target = peerLanguage?.code ?? defaultPeerCode() else { return }
+        debugLog("[LT] translating '\(chunk)' \(myLanguage.code)->\(target)")
         do {
             let response = try await Backend.translate(text: chunk, source: myLanguage.code, target: target)
             guard !isMuted, isActive else { return }   // muted while it was being translated
             sendPacket(Packet(type: "subtitle", lang: target, source: myLanguage.code, original: chunk,
                               translated: response.translatedText, voice: myVoiceId))
         } catch {
+            debugLog("[LT] translate failed: \(error)")
             errorMessage = "Translation is unavailable right now."
         }
     }
@@ -219,7 +225,10 @@ final class LiveTranslationSession: ObservableObject {
     // MARK: Other person -> me
 
     func handleIncoming(_ data: Data) {
-        guard let packet = try? JSONDecoder().decode(Packet.self, from: data) else { return }
+        guard let packet = try? JSONDecoder().decode(Packet.self, from: data) else {
+            debugLog("[LT] undecodable packet: \(String(data: data, encoding: .utf8) ?? "?")"); return
+        }
+        debugLog("[LT] received \(packet.type) \(packet.lang ?? "") \(packet.translated ?? "")")
         switch packet.type {
         case "lang":
             if let code = packet.lang, let lang = LiveLanguage.named(code: code) {

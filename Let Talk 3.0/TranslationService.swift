@@ -236,6 +236,7 @@ class SpeechRecognizer {
         // First check microphone permission
         AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
             guard granted else {
+                debugLog("[LT] microphone permission denied")
                 Task { @MainActor in
                     completion(.failure(SpeechRecognitionError.notAuthorized))
                 }
@@ -245,6 +246,7 @@ class SpeechRecognizer {
             // Then check speech recognition permission
             SFSpeechRecognizer.requestAuthorization { [weak self] status in
                 guard status == .authorized else {
+                    debugLog("[LT] speech recognition permission: \(status.rawValue)")
                     Task { @MainActor in
                         completion(.failure(SpeechRecognitionError.notAuthorized))
                     }
@@ -266,6 +268,7 @@ class SpeechRecognizer {
         
         speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: language))
         
+        debugLog("[LT] recognizer setup \(language) available=\(speechRecognizer?.isAvailable ?? false) inCall=\(WebRTCCallManager.shared.isInCall)")
         guard let speechRecognizer = speechRecognizer,
               speechRecognizer.isAvailable else {
             Task { @MainActor in
