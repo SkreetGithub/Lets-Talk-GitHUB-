@@ -116,7 +116,7 @@ final class CallKitManager: NSObject, ObservableObject {
         callController.request(CXTransaction(action: CXAnswerCallAction(call: entry.key))) { error in
             if error != nil {
                 // CallKit refused (e.g. the call already left it): answer in-app instead.
-                Task { try? await WebRTCCallManager.shared.answerCall(callId: callId, isVideo: entry.isVideo) }
+                Task { try? await WebRTCCallManager.shared.answerCall(callId: callId, isVideo: entry.value.isVideo) }
             }
         }
         return true
