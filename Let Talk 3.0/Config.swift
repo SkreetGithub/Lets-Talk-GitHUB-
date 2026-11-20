@@ -81,6 +81,45 @@ private extension Config {
 @inline(__always)
 func debugLog(_ items: Any...) {
     #if DEBUG
-    print(items.map { "\($0)" }.joined(separator: " "))
+    let line = items.map { "\($0)" }.joined(separator: " ")
+    NSLog("%@", line)      // also reaches the system log (`log show`), not only an attached console
+    if line.hasPrefix("[LT]") { DiagnosticsLog.add(line) }
     #endif
 }
+
+#if DEBUG
+import SwiftUI
+
+/// Debug builds only: the last live-translation diagnostics, shown on the call screen so a
+/// screenshot tells us which step of the pipeline stopped.
+final class DiagnosticsLog: ObservableObject {
+    static let shared = DiagnosticsLog()
+    @Published private(set) var lines: [String] = []
+
+    static func add(_ line: String) {
+        let stamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+        let entry = "\(stamp) \(line.dropFirst(5))"
+        DispatchQueue.main.async {
+            shared.lines.append(entry)
+            if shared.lines.count > 14 { shared.lines.removeFirst(shared.lines.count - 14) }
+        }
+    }
+}
+
+struct DiagnosticsOverlay: View {
+    @ObservedObject private var log = DiagnosticsLog.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            ForEach(Array(log.lines.enumerated()), id: \.offset) { _, line in
+                Text(line).lineLimit(2)
+            }
+        }
+        .font(.system(size: 9, design: .monospaced))
+        .foregroundColor(.green)
+        .padding(6)
+        .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 6))
+        .allowsHitTesting(false)
+    }
+}
+#endif
