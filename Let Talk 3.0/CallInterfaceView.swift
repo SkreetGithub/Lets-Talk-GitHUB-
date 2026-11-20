@@ -157,12 +157,6 @@ struct CallInterfaceView: View {
         VStack(spacing: DS.spacingL) {
             Spacer()
             
-            #if DEBUG
-            // Test builds: live-translation diagnostics (screenshot this if translation fails).
-            DiagnosticsOverlay()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-            #endif
 
             // Live translation subtitles sit directly above the controls
             SubtitleOverlay(session: liveTranslation)
