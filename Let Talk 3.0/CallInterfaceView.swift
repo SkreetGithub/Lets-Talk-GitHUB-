@@ -92,8 +92,9 @@ struct CallInterfaceView: View {
                     .ignoresSafeArea()
             }
             
-            // Local video (picture-in-picture)
-            if callManager.isVideoEnabled {
+            // Local video (picture-in-picture): only once the call is answered and connected,
+            // not while it's ringing or connecting.
+            if callManager.isVideoEnabled && callManager.callStatus == .connected {
                 // Anchored top-right BELOW the name/status row (it used to sit on top of the
                 // connection indicator and translation chip at a fixed screen position).
                 LocalVideoView(localVideoView: $localVideoView)
