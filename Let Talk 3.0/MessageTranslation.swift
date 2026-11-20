@@ -48,8 +48,12 @@ final class MessageTranslator: ObservableObject {
         let code = entries[message.id]?.source ?? message.metadata?["lang"]
         guard let code else { return nil }
         let base = String(code.prefix(2))
+        // In the app's language: "English" in English, "inglés" in Spanish, "anglais" in French.
+        if let name = AppLanguage.locale.localizedString(forLanguageCode: base) {
+            // English and German capitalize language names; Spanish, French etc. don't.
+            return ["en", "de"].contains(AppLanguage.current) ? name.capitalized(with: AppLanguage.locale) : name
+        }
         return LiveLanguage.named(code: base)?.name
-            ?? Locale.current.localizedString(forLanguageCode: base)
     }
 
     /// Translates any incoming text messages that aren't translated into my language yet.

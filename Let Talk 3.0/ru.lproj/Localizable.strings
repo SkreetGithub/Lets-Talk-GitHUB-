@@ -470,3 +470,6 @@
 
 "Show password" = "Показать пароль";
 "Hide password" = "Скрыть пароль";
+
+"Translated from %@ · Show Original" = "Переведено с языка: %@ · Показать оригинал";
+"Translated · Show Original" = "Переведено · Показать оригинал";

@@ -470,3 +470,6 @@
 
 "Show password" = "पासवर्ड दिखाएं";
 "Hide password" = "पासवर्ड छिपाएं";
+
+"Translated from %@ · Show Original" = "%@ से अनुवादित · मूल दिखाएं";
+"Translated · Show Original" = "अनुवादित · मूल दिखाएं";

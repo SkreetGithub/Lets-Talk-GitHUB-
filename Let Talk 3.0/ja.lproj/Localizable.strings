@@ -470,3 +470,6 @@
 
 "Show password" = "パスワードを表示";
 "Hide password" = "パスワードを隠す";
+
+"Translated from %@ · Show Original" = "%@から翻訳 · 原文を表示";
+"Translated · Show Original" = "翻訳済み · 原文を表示";

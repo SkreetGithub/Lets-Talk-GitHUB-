@@ -470,3 +470,6 @@
 
 "Show password" = "Afficher le mot de passe";
 "Hide password" = "Masquer le mot de passe";
+
+"Translated from %@ · Show Original" = "Traduit de l’%@ · Voir l’original";
+"Translated · Show Original" = "Traduit · Voir l’original";

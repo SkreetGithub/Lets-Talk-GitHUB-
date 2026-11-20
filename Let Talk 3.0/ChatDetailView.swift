@@ -405,7 +405,7 @@ struct MessageBubble: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "translate")
-                        Text(showOriginal ? "Show Translation" : translationLabel)
+                        Text(showOriginal ? L("Show Translation") : translationLabel)
                     }
                     .font(.caption.weight(.medium))
                     .foregroundColor(.accentColor)
@@ -420,9 +420,9 @@ struct MessageBubble: View {
 
     private var translationLabel: String {
         if let name = translator.sourceLanguageName(for: message) {
-            return "Translated from \(name) · Show Original"
+            return String(format: L("Translated from %@ · Show Original"), name)
         }
-        return "Translated · Show Original"
+        return L("Translated · Show Original")
     }
     
     private var imageContent: some View {

@@ -470,3 +470,6 @@
 
 "Show password" = "비밀번호 표시";
 "Hide password" = "비밀번호 숨기기";
+
+"Translated from %@ · Show Original" = "%@에서 번역됨 · 원문 보기";
+"Translated · Show Original" = "번역됨 · 원문 보기";
