@@ -224,6 +224,11 @@ class SpeechRecognizer {
     private var completion: ((Result<String, Error>) -> Void)?
     /// True while listening to the call's microphone feed instead of our own engine.
     private var usingCallAudio = false
+    /// Bumped for every new listening session. A cancelled session's late callbacks carry an old
+    /// number and are ignored — before, each cancelled session reported an error that restarted
+    /// listening AND stopped the new session, so a call's recognizer kept killing itself and
+    /// only a couple of sentences ever got translated.
+    private var generation = 0
     
     func startRecording(language: String, completion: @escaping (Result<String, Error>) -> Void) {
         self.completion = completion
@@ -256,6 +261,8 @@ class SpeechRecognizer {
     private func setupRecognition(language: String, completion: @escaping (Result<String, Error>) -> Void) {
         // Stop any existing recording first
         stopRecording()
+        generation += 1
+        let gen = generation
         
         speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: language))
         
@@ -275,19 +282,20 @@ class SpeechRecognizer {
             request.shouldReportPartialResults = true
             recognitionRequest = request
             recognitionTask = speechRecognizer.recognitionTask(with: request) { [weak self] result, error in
-                if let error = error {
-                    Task { @MainActor in completion(.failure(error)) }
-                    self?.stopRecording()
-                    return
-                }
-                if let result = result {
-                    let text = result.bestTranscription.formattedString
-                    Task { @MainActor in
-                        completion(.success(text))
-                        // Keep a call's translation listening after each finished sentence.
-                        if result.isFinal { completion(.failure(SpeechRecognitionError.finished)) }
+                DispatchQueue.main.async {
+                    guard let self, gen == self.generation else { return }   // a cancelled session
+                    if let error = error {
+                        self.stopRecording()
+                        completion(.failure(error))
+                        return
                     }
-                    if result.isFinal { self?.stopRecording() }
+                    guard let result = result else { return }
+                    completion(.success(result.bestTranscription.formattedString))
+                    if result.isFinal {
+                        self.stopRecording()
+                        // Keep a call's translation listening after each finished sentence.
+                        completion(.failure(SpeechRecognitionError.finished))
+                    }
                 }
             }
             CallAudioDevice.shared.onMicrophoneBuffer = { [weak request] buffer in
@@ -329,22 +337,16 @@ class SpeechRecognizer {
         recognitionRequest.shouldReportPartialResults = true
         
         recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
-            if let error = error {
-                Task { @MainActor in
+            DispatchQueue.main.async {
+                guard let self, gen == self.generation else { return }   // a cancelled session
+                if let error = error {
+                    self.stopRecording()
                     completion(.failure(error))
+                    return
                 }
-                self?.stopRecording()
-                return
-            }
-            
-            if let result = result {
-                Task { @MainActor in
-                    completion(.success(result.bestTranscription.formattedString))
-                }
-                
-                if result.isFinal {
-                    self?.stopRecording()
-                }
+                guard let result = result else { return }
+                completion(.success(result.bestTranscription.formattedString))
+                if result.isFinal { self.stopRecording() }
             }
         }
         
@@ -385,6 +387,7 @@ class SpeechRecognizer {
     }
     
     func stopRecording() {
+        generation += 1          // anything the stopped session reports later is ignored
         if usingCallAudio {
             CallAudioDevice.shared.onMicrophoneBuffer = nil
             usingCallAudio = false

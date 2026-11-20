@@ -612,6 +612,7 @@ extension WebRTCCallManager: RTCPeerConnectionDelegate {
         self.dataChannel = dataChannel
         if dataChannel.readyState == .open {
             DispatchQueue.main.async { self.sendVideoState() }
+            Task { @MainActor in LiveTranslationSession.shared.dataChannelDidOpen() }
         }
     }
 }
@@ -624,6 +625,7 @@ extension WebRTCCallManager: RTCDataChannelDelegate {
         // Tell the other phone whether my camera is on as soon as we can talk.
         if dataChannel.readyState == .open {
             DispatchQueue.main.async { self.sendVideoState() }
+            Task { @MainActor in LiveTranslationSession.shared.dataChannelDidOpen() }
         }
     }
 

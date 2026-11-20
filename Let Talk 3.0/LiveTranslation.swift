@@ -83,6 +83,14 @@ final class LiveTranslationSession: ObservableObject {
         listen()
     }
 
+    /// The call's data channel just opened. The "lang" packet sent in start() usually went out
+    /// before the channel existed and was lost, so the other phone never learned my language
+    /// (and translated into a guess). Send it again now that it can arrive.
+    func dataChannelDidOpen() {
+        guard isActive else { return }
+        sendPacket(Packet(type: "lang", lang: myLanguage.code, source: nil, original: nil, translated: nil, voice: myVoiceId))
+    }
+
     func stop() {
         isActive = false
         isMuted = false
