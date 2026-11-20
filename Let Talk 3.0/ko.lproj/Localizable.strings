@@ -467,3 +467,6 @@
 "Your translations will appear here." = "번역이 여기에 표시됩니다.";
 "Zoom" = "확대/축소";
 "iPhone Ringtone" = "iPhone 벨소리";
+
+"Show password" = "비밀번호 표시";
+"Hide password" = "비밀번호 숨기기";

@@ -467,3 +467,6 @@
 "Your translations will appear here." = "ここに翻訳が表示されます。";
 "Zoom" = "ズーム";
 "iPhone Ringtone" = "iPhoneの着信音";
+
+"Show password" = "パスワードを表示";
+"Hide password" = "パスワードを隠す";

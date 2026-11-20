@@ -387,6 +387,12 @@ struct CustomTextField: View {
     let icon: String
     var keyboardType: UIKeyboardType = .default
     var isSecure: Bool = false
+    /// Password fields: the eye button shows or hides what was typed.
+    @State private var isRevealed = false
+    
+    private var prompt: Text {
+        Text(LocalizedStringKey(placeholder)).foregroundColor(.white.opacity(0.7))
+    }
     
     var body: some View {
         HStack {
@@ -395,14 +401,35 @@ struct CustomTextField: View {
                 .frame(width: 20)
             
             if isSecure {
-                SecureField("", text: $text, prompt: Text(placeholder).foregroundColor(.white.opacity(0.7)))
-                    .textFieldStyle(PlainTextFieldStyle())
-                    .foregroundColor(.white)
-                    .keyboardType(keyboardType)
+                Group {
+                    if isRevealed {
+                        TextField("", text: $text, prompt: prompt)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    } else {
+                        SecureField("", text: $text, prompt: prompt)
+                    }
+                }
+                .textFieldStyle(PlainTextFieldStyle())
+                .foregroundStyle(.white)
+                .tint(.white)
+                .keyboardType(keyboardType)
+                
+                Button {
+                    isRevealed.toggle()
+                } label: {
+                    Image(systemName: isRevealed ? "eye.slash.fill" : "eye.fill")
+                        .foregroundColor(.white.opacity(0.8))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isRevealed ? "Hide password" : "Show password")
             } else {
-                TextField("", text: $text, prompt: Text(placeholder).foregroundColor(.white.opacity(0.7)))
+                TextField("", text: $text, prompt: prompt)
                     .textFieldStyle(PlainTextFieldStyle())
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
+                    .tint(.white)
                     .keyboardType(keyboardType)
                     .textInputAutocapitalization(keyboardType == .emailAddress ? .never : nil)
                     .autocorrectionDisabled(keyboardType == .emailAddress)
