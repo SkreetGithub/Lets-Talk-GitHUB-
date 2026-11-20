@@ -51,6 +51,9 @@ final class CallAudioDevice: NSObject, RTCAudioDevice {
     private var _isRecording = false
 
     private var recognizerBuffers = 0
+    private var lastBuild = Date.distantPast
+    /// Set once the microphone actually delivers audio after a (re)build (logged once).
+    private var micLive = false
 
     /// Scratch buffer for float -> int16 conversion on the audio thread (sized generously).
     private var int16Scratch = [Int16](repeating: 0, count: 8192)
@@ -106,11 +109,13 @@ final class CallAudioDevice: NSObject, RTCAudioDevice {
     }
 
     func startPlayout() -> Bool {
+        debugLog("[LT] webrtc startPlayout")
         lock.withLock { _isPlaying = true }
         return startEngineIfNeeded()
     }
 
     func stopPlayout() -> Bool {
+        debugLog("[LT] webrtc stopPlayout")
         let stop = lock.withLock { () -> Bool in
             _isPlaying = false
             return !_isRecording
@@ -125,11 +130,13 @@ final class CallAudioDevice: NSObject, RTCAudioDevice {
     }
 
     func startRecording() -> Bool {
+        debugLog("[LT] webrtc startRecording")
         lock.withLock { _isRecording = true }
         return startEngineIfNeeded()
     }
 
     func stopRecording() -> Bool {
+        debugLog("[LT] webrtc stopRecording")
         let stop = lock.withLock { () -> Bool in
             _isRecording = false
             return !_isPlaying
@@ -161,11 +168,11 @@ final class CallAudioDevice: NSObject, RTCAudioDevice {
         let input = engine.inputNode
         // Echo cancellation + noise suppression, like the Phone app. Not available on every
         // Simulator; the call still works without it.
-        do { try input.setVoiceProcessingEnabled(true) } catch { debugLog("Voice processing unavailable:", error) }
+        do { try input.setVoiceProcessingEnabled(true) } catch { debugLog("[LT] voice processing unavailable:", error) }
 
         let micFormat = input.outputFormat(forBus: 0)
         guard micFormat.sampleRate > 0, micFormat.channelCount > 0 else {
-            debugLog("CallAudioDevice: microphone not available yet")
+            debugLog("[LT] call audio: microphone not available yet")
             return false
         }
         let rateChanged = microphoneFormat?.sampleRate != micFormat.sampleRate
@@ -202,19 +209,35 @@ final class CallAudioDevice: NSObject, RTCAudioDevice {
         self.engine = engine
         self.sinkNode = sink
         self.sourceNode = source
+        lastBuild = Date()
+        micLive = false
         // WebRTC asked for the rate before the engine existed; tell it the real one.
         if rateChanged { delegate?.notifyAudioInputParametersChange() }
 
-        // Route changes (speaker / Bluetooth / headphones) stop the engine: rebuild it.
+        // Route changes (speaker / Bluetooth / headphones) can stop the engine. Turning on voice
+        // processing ALSO posts this notification right after start — rebuilding on that one
+        // started a loop (rebuild → notification → rebuild, twice a second) that kept the
+        // microphone from ever delivering audio. So: ignore it while the engine is still running
+        // or was just built; otherwise restart the same engine, and rebuild only if that fails.
         configObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
         ) { [weak self] _ in
             guard let self else { return }
-            let active = self.lock.withLock { self._isPlaying || self._isRecording }
-            guard active else { return }
-            self.delegate?.notifyAudioInputParametersChange()
-            self.delegate?.notifyAudioOutputParametersChange()
-            self.engineQueue.async { _ = self.buildAndStartEngine() }
+            self.engineQueue.async {
+                let active = self.lock.withLock { self._isPlaying || self._isRecording }
+                guard active, let current = self.engine else { return }
+                if current.isRunning { return }
+                if Date().timeIntervalSince(self.lastBuild) < 1.5 {
+                    try? current.start()
+                    return
+                }
+                debugLog("[LT] call audio: route changed, restarting")
+                do {
+                    try current.start()
+                } catch {
+                    _ = self.buildAndStartEngine()
+                }
+            }
         }
         return true
     }
@@ -239,6 +262,10 @@ final class CallAudioDevice: NSObject, RTCAudioDevice {
         let frames = Int(frameCount)
         let abl = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
         guard frames > 0, let first = abl.first, let raw = first.mData else { return }
+        if !micLive {
+            micLive = true
+            debugLog("[LT] microphone is live (\(frames) frames), recognizer attached: \(onMicrophoneBuffer != nil)")
+        }
 
         // 1) Hand a MONO copy (channel 0) to the speech recognizer, off the audio thread.
         //    With voice processing on a real iPhone the mic format can have extra channels,
