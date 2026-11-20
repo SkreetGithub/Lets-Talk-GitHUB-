@@ -58,9 +58,7 @@ Deno.serve(async (req) => {
     const apns = apnsConfig();
     if (!apns) return json({ sent: false, reason: "apns not configured" });
 
-    const key = await importPKCS8(apns.p8, "ES256");
-    const jwt = await new SignJWT({}).setProtectedHeader({ alg: "ES256", kid: apns.keyId })
-      .setIssuer(apns.teamId).setIssuedAt().sign(key);
+    let jwt = await providerToken(admin, apns.p8, apns.keyId, apns.teamId);
     // Production token (TestFlight/App Store) or sandbox token (Xcode build): try the configured
     // APNs server first, then the other one if Apple says the token belongs there.
     const primary = apns.env === "production" ? "api.push.apple.com" : "api.sandbox.push.apple.com";
@@ -90,6 +88,11 @@ Deno.serve(async (req) => {
     });
     let r = await send(primary);
     let reason = r.ok ? "" : await r.text();
+    if (r.status === 403 && reason.includes("ExpiredProviderToken")) {
+      jwt = await providerToken(admin, apns.p8, apns.keyId, apns.teamId, true);
+      r = await send(primary);
+      reason = r.ok ? "" : await r.text();
+    }
     if (r.status === 400 && reason.includes("BadDeviceToken")) {
       r = await send(other);
       reason = r.ok ? "" : await r.text();
@@ -155,4 +158,19 @@ function apnsConfig() {
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+// Apple allows a new provider token (JWT) at most every 20 minutes and accepts one for 60.
+// Signing a fresh one per push got pushes refused (429 TooManyProviderTokenUpdates), so the
+// token is kept in apns_token_cache and reused for 50 minutes by both push functions.
+async function providerToken(admin: any, p8: string, keyId: string, teamId: string, forceNew = false): Promise<string> {
+  if (!forceNew) {
+    const { data } = await admin.from("apns_token_cache").select("jwt, issued_at").eq("key_id", keyId).maybeSingle();
+    if (data && Date.now() - new Date(data.issued_at).getTime() < 50 * 60 * 1000) return data.jwt;
+  }
+  const key = await importPKCS8(p8, "ES256");
+  const jwt = await new SignJWT({}).setProtectedHeader({ alg: "ES256", kid: keyId })
+    .setIssuer(teamId).setIssuedAt().sign(key);
+  await admin.from("apns_token_cache").upsert({ key_id: keyId, jwt, issued_at: new Date().toISOString() });
+  return jwt;
 }
