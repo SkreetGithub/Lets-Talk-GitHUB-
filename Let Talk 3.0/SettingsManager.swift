@@ -295,8 +295,20 @@ private struct ProfileSettingsRow: Codable {
 // MARK: - App Settings Model
 
 struct AppSettings: Codable {
+    static let supportedLanguages: Set<String> = ["en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh", "ar", "hi"]
+
+    /// The iPhone's language as one of the app's language codes ("es-MX" -> "es", "zh-Hans-CN" -> "zh").
+    static var deviceLanguage: String {
+        for identifier in Locale.preferredLanguages {
+            let code = Locale(identifier: identifier).language.languageCode?.identifier ?? ""
+            if supportedLanguages.contains(code) { return code }
+        }
+        return "en"
+    }
+
     var theme: AppTheme = .system
-    var language: String = "en"
+    /// First launch: the iPhone's own language (if the app has it), else English.
+    var language: String = AppSettings.deviceLanguage
     var sourceLanguage: String = "auto"
     var targetLanguage: String = "es"
     var notifications: NotificationSettings = NotificationSettings()

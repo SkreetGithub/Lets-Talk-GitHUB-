@@ -418,7 +418,7 @@ struct CustomTextField: View {
                 Button {
                     isRevealed.toggle()
                 } label: {
-                    Image(systemName: isRevealed ? "eye.slash.fill" : "eye.fill")
+                    Image(systemName: isRevealed ? "eye.fill" : "eye.slash.fill")
                         .foregroundColor(.white.opacity(0.8))
                         .frame(width: 28, height: 28)
                         .contentShape(Rectangle())
