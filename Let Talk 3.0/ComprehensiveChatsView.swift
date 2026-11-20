@@ -164,6 +164,14 @@ struct ChatRow: View {
     /// The other person's name (chats used to all be titled "Chat").
     let title: String
     let photoURL: String?
+    /// Incoming last messages are shown already translated into my language.
+    @ObservedObject private var translator = MessageTranslator.shared
+    
+    private var previewText: String? {
+        guard let last = chat.lastMessage else { return nil }
+        return translator.previewTranslation(text: last.content, senderId: last.senderId,
+                                             myUserId: AuthManager.shared.currentUserId) ?? last.content
+    }
     
     var body: some View {
         HStack(spacing: 12) {
@@ -209,8 +217,8 @@ struct ChatRow: View {
                 }
                 
                 HStack {
-                    if let lastMessage = chat.lastMessage {
-                        Text(lastMessage.content)
+                    if let preview = previewText {
+                        Text(preview)
                             .font(.system(size: 14))
                             .foregroundColor(.secondary)
                             .lineLimit(2)
@@ -232,6 +240,11 @@ struct ChatRow: View {
             }
         }
         .padding(.vertical, 4)
+        .task(id: (chat.lastMessage?.content ?? "") + translator.myLanguage) {
+            guard let last = chat.lastMessage, last.type == .text else { return }
+            translator.translatePreview(text: last.content, senderId: last.senderId,
+                                        myUserId: AuthManager.shared.currentUserId)
+        }
     }
 }
 

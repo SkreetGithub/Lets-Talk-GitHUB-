@@ -109,6 +109,49 @@ final class MessageTranslator: ObservableObject {
         }
     }
 
+    // MARK: - Chat list previews
+
+    /// The Chats list only has the last message's text (no message id), so its translation is
+    /// cached by text. Stored in the same cache as messages, under a "preview:" key.
+    private func previewKey(_ text: String) -> String { "preview:" + text }
+
+    /// The translated preview for the last message of a chat, or nil to show it as sent.
+    func previewTranslation(text: String, senderId: String, myUserId: String?) -> String? {
+        guard SettingsManager.shared.settings.translation.autoTranslate,
+              senderId.lowercased() != myUserId?.lowercased(),
+              let entry = entries[previewKey(text)], entry.language == myLanguage else { return nil }
+        return entry.text
+    }
+
+    /// Translates the last message shown in a Chats row into my language, once.
+    func translatePreview(text: String, senderId: String, myUserId: String?) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = previewKey(text)
+        let target = myLanguage
+        guard SettingsManager.shared.settings.translation.autoTranslate,
+              senderId.lowercased() != myUserId?.lowercased(),
+              !trimmed.isEmpty,
+              entries[key]?.language != target,
+              !inFlight.contains(key),
+              AIConsent.shared.hasConsented   // the chat screen asks; the list never pops a prompt
+        else { return }
+        inFlight.insert(key)
+        Task {
+            do {
+                let response = try await Backend.translate(text: text, source: nil, target: target)
+                let translated = response.translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                let sameLanguage = translated.isEmpty || translated == trimmed
+                    || (response.detectedLanguage.map { $0.hasPrefix(target) } ?? false)
+                entries[key] = Entry(language: target, text: sameLanguage ? nil : translated,
+                                     source: response.detectedLanguage)
+                save()
+            } catch {
+                // Show it as sent; the next time the row appears it tries again.
+            }
+            inFlight.remove(key)
+        }
+    }
+
     private func save() {
         if entries.count > maxCached {
             // Drop an arbitrary overflow; a dropped message is simply translated again if reopened.
