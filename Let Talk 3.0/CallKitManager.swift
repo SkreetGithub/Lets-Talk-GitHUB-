@@ -108,6 +108,20 @@ final class CallKitManager: NSObject, ObservableObject {
         }
     }
 
+    /// Answer through CallKit when the iPhone is also showing this call (the banner at the top),
+    /// so the banner closes and the iPhone knows the call was answered. Returns false if CallKit
+    /// isn't showing it, so the caller answers in-app directly.
+    func answerIfShowing(callId: String) -> Bool {
+        guard let entry = callIds.first(where: { $0.value.callId == callId }) else { return false }
+        callController.request(CXTransaction(action: CXAnswerCallAction(call: entry.key))) { error in
+            if error != nil {
+                // CallKit refused (e.g. the call already left it): answer in-app instead.
+                Task { try? await WebRTCCallManager.shared.answerCall(callId: callId, isVideo: entry.isVideo) }
+            }
+        }
+        return true
+    }
+
     func endCall(callId: String) {
         guard let entry = callIds.first(where: { $0.value.callId == callId }) else { return }
         let action = CXEndCallAction(call: entry.key)

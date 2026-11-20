@@ -663,6 +663,9 @@ extension WebRTCCallManager: SupabaseSignalingDelegate {
             self.resetCallState()
             self.activeCallId = call.id
             self.currentCall = call
+            // Voice calls ring as voice: no empty camera box on the incoming screen.
+            self.isVideoEnabled = call.isVideo
+            self.isRemoteVideoOn = call.isVideo
             self.callStatus = .incoming
             // Watch the call row so we stop ringing if the caller hangs up first.
             self.signalingService.watchCall(callId: call.id)

@@ -377,6 +377,8 @@ struct CallInterfaceView: View {
     }
     
     private func answerCall() {
+        // If the iPhone's call banner is also up, answer through it so it closes too.
+        if CallKitManager.shared.answerIfShowing(callId: call.id) { return }
         Task {
             try? await callManager.answerCall(callId: call.id, isVideo: call.isVideo)
         }
