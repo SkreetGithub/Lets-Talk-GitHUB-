@@ -720,11 +720,17 @@ struct ProfileEditorView: View {
                         TextField("Full Name", text: $name)
                     }
                     
-                    HStack {
-                        Image(systemName: "phone.fill")
-                            .foregroundColor(.green)
-                        TextField("Phone Number", text: $phone)
-                            .keyboardType(.phonePad)
+                    // Your Let Talk number is changed in Settings › My Let Talk Number (once a year),
+                    // not typed here.
+                    NavigationLink {
+                        MyNumberView().environmentObject(authManager)
+                    } label: {
+                        HStack {
+                            Image(systemName: "phone.fill")
+                                .foregroundColor(.green)
+                            Text(phone.isEmpty ? "Let Talk Number" : phone)
+                                .foregroundColor(.secondary)
+                        }
                     }
                     
                     HStack {
@@ -916,7 +922,6 @@ struct ProfileEditorView: View {
             do {
                 try await authManager.updateUserProfile(
                     name: name,
-                    phone: phone,
                     profileImage: nil
                 )
                 

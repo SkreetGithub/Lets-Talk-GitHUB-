@@ -46,6 +46,9 @@ struct CallInterfaceView: View {
             setupCall()
             startControlsTimer()
             startCallTimer()
+            // Answered from the iPhone's call screen: the call can already be connected when this
+            // screen appears, so the "became connected" change below never fires. Start here too.
+            if callManager.callStatus == .connected { liveTranslation.start() }
         }
         .onDisappear {
             stopTimers()

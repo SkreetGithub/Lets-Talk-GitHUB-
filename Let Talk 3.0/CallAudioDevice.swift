@@ -237,16 +237,18 @@ final class CallAudioDevice: NSObject, RTCAudioDevice {
         let abl = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
         guard frames > 0, let first = abl.first, let raw = first.mData else { return }
 
-        // 1) Hand a copy to the speech recognizer (off the audio thread).
+        // 1) Hand a MONO copy (channel 0) to the speech recognizer, off the audio thread.
+        //    With voice processing on a real iPhone the mic format can have extra channels,
+        //    which the recognizer doesn't accept.
         if let handler = onMicrophoneBuffer,
-           let copy = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount),
-           let channels = copy.floatChannelData {
+           let mono = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: format.sampleRate,
+                                    channels: 1, interleaved: false),
+           let copy = AVAudioPCMBuffer(pcmFormat: mono, frameCapacity: frameCount),
+           let dst = copy.floatChannelData?[0] {
             copy.frameLength = frameCount
-            for (index, buffer) in abl.enumerated() where index < Int(format.channelCount) {
-                if let src = buffer.mData {
-                    memcpy(channels[index], src, Int(buffer.mDataByteSize))
-                }
-            }
+            let src = raw.assumingMemoryBound(to: Float.self)
+            let step = format.isInterleaved ? Int(format.channelCount) : 1
+            for i in 0..<frames { dst[i] = src[i * step] }
             micQueue.async { handler(copy) }
         }
 

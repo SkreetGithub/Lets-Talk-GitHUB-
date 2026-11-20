@@ -729,6 +729,10 @@ extension ProfileRow {
         isOnline = (try? c.decodeIfPresent(Bool.self, forKey: .isOnline)) ?? false
         deviceTokens = try? c.decodeIfPresent([String].self, forKey: .deviceTokens)
         savedPhoneNumbers = (try? c.decodeIfPresent([SavedPhoneNumber].self, forKey: .savedPhoneNumbers)) ?? []
+        // These two were never read back, so every profile reload wiped the chosen voice in the
+        // app (Edit Profile showed "Not set" and calls used the iPhone voice) even though it was saved.
+        gender = try? c.decodeIfPresent(String.self, forKey: .gender)
+        voiceId = try? c.decodeIfPresent(String.self, forKey: .voiceId)
     }
 }
 
