@@ -395,7 +395,7 @@
         .catch(function () {
           btn.disabled = false;
           msg.classList.add('err');
-          msg.textContent = "That didn't go through. Please try again, or email support@lettalkapp.com.";
+          msg.textContent = "That didn't go through. Please try again, or email lettalksupport@gmail.com.";
         });
     });
   });
