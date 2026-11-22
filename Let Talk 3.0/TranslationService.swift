@@ -7,11 +7,7 @@ class TranslationService: ObservableObject {
     
     private let speechRecognizer = SpeechRecognizer()
     private let synthesizer = AVSpeechSynthesizer()
-    private let googleAPIKey = Config.googleTranslateAPIKey
     private let dataPersistence = DataPersistenceManager.shared
-    private let openAIAPIKey = Config.openAIAPIKey
-    private let googleBaseURL = "https://translation.googleapis.com/language/translate/v2"
-    private let openAIBaseURL = "https://api.openai.com/v1/chat/completions"
     
     private var audioSession: AVAudioSession?
     private var audioEngine: AVAudioEngine?
@@ -33,7 +29,7 @@ class TranslationService: ObservableObject {
             try audioSession?.setCategory(.playAndRecord, mode: .default)
             try audioSession?.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
-            print("Failed to set up audio session: \(error)")
+            debugLog("Failed to set up audio session: \(error)")
         }
     }
     
@@ -42,6 +38,8 @@ class TranslationService: ObservableObject {
             return TranslationResult(originalText: text, translatedText: "", detectedLanguage: sourceLanguage, confidence: 0.0)
         }
         
+        guard AIConsent.shared.requireConsent() else { throw TranslationError.consentRequired }
+
         isTranslating = true
         defer { isTranslating = false }
         
@@ -78,81 +76,25 @@ class TranslationService: ObservableObject {
     }
     
     private func translateWithGoogle(text: String, from sourceLanguage: String, to targetLanguage: String) async throws -> TranslationResult {
-        var components = URLComponents(string: googleBaseURL)
-        components?.queryItems = [
-            URLQueryItem(name: "q", value: text),
-            URLQueryItem(name: "source", value: sourceLanguage),
-            URLQueryItem(name: "target", value: targetLanguage),
-            URLQueryItem(name: "key", value: googleAPIKey)
-        ]
-        
-        guard let url = components?.url else {
-            throw TranslationError.invalidURL
-        }
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        
-        let (data, response) = try await URLSession.shared.data(for: request)
-        
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw TranslationError.serverError
-        }
-        
-        let translationResponse = try JSONDecoder().decode(TranslationResponse.self, from: data)
-        let translatedText = translationResponse.data.translations.first?.translatedText ?? ""
-        
-        return TranslationResult(
-            originalText: text,
-            translatedText: translatedText,
-            detectedLanguage: sourceLanguage,
-            confidence: 0.9
-        )
+        try await translateViaBackend(text: text, from: sourceLanguage, to: targetLanguage, provider: "google", confidence: 0.9)
     }
-    
+
     private func translateWithOpenAI(text: String, from sourceLanguage: String, to targetLanguage: String) async throws -> TranslationResult {
-        guard let url = URL(string: openAIBaseURL) else {
-            throw TranslationError.invalidURL
-        }
-        
-        let targetLanguageName = getLanguageName(for: targetLanguage)
-        let systemPrompt = "You are a professional translator. Translate the given text to \(targetLanguageName). Only return the translated text, nothing else."
-        
-        let requestBody: [String: Any] = [
-            "model": "gpt-3.5-turbo",
-            "messages": [
-                ["role": "system", "content": systemPrompt],
-                ["role": "user", "content": text]
-            ],
-            "max_tokens": 1000,
-            "temperature": 0.3
-        ]
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(openAIAPIKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
-        
-        let (data, response) = try await URLSession.shared.data(for: request)
-        
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw TranslationError.serverError
-        }
-        
-        let openAIResponse = try JSONDecoder().decode(OpenAIResponse.self, from: data)
-        let translatedText = openAIResponse.choices.first?.message.content.trimmingCharacters(in: .whitespacesAndNewlines) ?? text
-        
+        try await translateViaBackend(text: text, from: sourceLanguage, to: targetLanguage, provider: "openai", confidence: 0.95)
+    }
+
+    /// All provider calls go through the `translate` Edge Function; no API keys exist in the app.
+    private func translateViaBackend(text: String, from sourceLanguage: String, to targetLanguage: String, provider: String, confidence: Double) async throws -> TranslationResult {
+        let source: String? = (sourceLanguage.isEmpty || sourceLanguage == "auto") ? nil : sourceLanguage
+        let response = try await Backend.translate(text: text, source: source, target: targetLanguage, provider: provider)
         return TranslationResult(
             originalText: text,
-            translatedText: translatedText,
-            detectedLanguage: sourceLanguage,
-            confidence: 0.95
+            translatedText: response.translatedText,
+            detectedLanguage: response.detectedLanguage ?? sourceLanguage,
+            confidence: confidence
         )
     }
-    
+
     private func getLanguageName(for code: String) -> String {
         let languageNames: [String: String] = [
             "en": "English",
@@ -246,11 +188,11 @@ class TranslationService: ObservableObject {
                             }
                         }
                     } catch {
-                        print("Real-time translation error: \(error)")
+                        debugLog("Real-time translation error: \(error)")
                     }
                 }
             case .failure(let error):
-                print("Speech recognition error: \(error)")
+                debugLog("Speech recognition error: \(error)")
             }
         }
     }
@@ -280,6 +222,11 @@ class SpeechRecognizer {
     private var speechRecognizer: SFSpeechRecognizer?
     private var audioSession: AVAudioSession?
     private var completion: ((Result<String, Error>) -> Void)?
+    /// Bumped for every new listening session. A cancelled session's late callbacks carry an old
+    /// number and are ignored — before, each cancelled session reported an error that restarted
+    /// listening AND stopped the new session, so a call's recognizer kept killing itself and
+    /// only a couple of sentences ever got translated.
+    private var generation = 0
     
     func startRecording(language: String, completion: @escaping (Result<String, Error>) -> Void) {
         self.completion = completion
@@ -287,6 +234,7 @@ class SpeechRecognizer {
         // First check microphone permission
         AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
             guard granted else {
+                debugLog("[LT] microphone permission denied")
                 Task { @MainActor in
                     completion(.failure(SpeechRecognitionError.notAuthorized))
                 }
@@ -296,13 +244,16 @@ class SpeechRecognizer {
             // Then check speech recognition permission
             SFSpeechRecognizer.requestAuthorization { [weak self] status in
                 guard status == .authorized else {
+                    debugLog("[LT] speech recognition permission: \(status.rawValue)")
                     Task { @MainActor in
                         completion(.failure(SpeechRecognitionError.notAuthorized))
                     }
                     return
                 }
-                
-                self?.setupRecognition(language: language, completion: completion)
+                // AVAudioEngine setup must happen on the main thread.
+                DispatchQueue.main.async {
+                    self?.setupRecognition(language: language, completion: completion)
+                }
             }
         }
     }
@@ -310,9 +261,12 @@ class SpeechRecognizer {
     private func setupRecognition(language: String, completion: @escaping (Result<String, Error>) -> Void) {
         // Stop any existing recording first
         stopRecording()
+        generation += 1
+        let gen = generation
         
         speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: language))
         
+        debugLog("[LT] recognizer setup \(language) available=\(speechRecognizer?.isAvailable ?? false) inCall=\(WebRTCCallManager.shared.isInCall)")
         guard let speechRecognizer = speechRecognizer,
               speechRecognizer.isAvailable else {
             Task { @MainActor in
@@ -321,16 +275,23 @@ class SpeechRecognizer {
             return
         }
         
-        // Setup audio session
-        audioSession = AVAudioSession.sharedInstance()
-        do {
-            try audioSession?.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
-            try audioSession?.setActive(true, options: .notifyOthersOnDeactivation)
-        } catch {
-            Task { @MainActor in
-                completion(.failure(error))
+        // Setup audio session. During a call WebRTC already owns a .playAndRecord/.voiceChat session:
+        // leave it alone (switching mode/route here broke the call's audio). Only configure it when
+        // nothing else has.
+        let session = AVAudioSession.sharedInstance()
+        if session.category != .playAndRecord {
+            do {
+                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+                try session.setActive(true, options: .notifyOthersOnDeactivation)
+                audioSession = session          // we activated it, so we deactivate it later
+            } catch {
+                Task { @MainActor in
+                    completion(.failure(error))
+                }
+                return
             }
-            return
+        } else {
+            audioSession = nil                  // someone else (the call) owns the session
         }
         
         audioEngine = AVAudioEngine()
@@ -346,22 +307,16 @@ class SpeechRecognizer {
         recognitionRequest.shouldReportPartialResults = true
         
         recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
-            if let error = error {
-                Task { @MainActor in
+            DispatchQueue.main.async {
+                guard let self, gen == self.generation else { return }   // a cancelled session
+                if let error = error {
+                    self.stopRecording()
                     completion(.failure(error))
+                    return
                 }
-                self?.stopRecording()
-                return
-            }
-            
-            if let result = result {
-                Task { @MainActor in
-                    completion(.success(result.bestTranscription.formattedString))
-                }
-                
-                if result.isFinal {
-                    self?.stopRecording()
-                }
+                guard let result = result else { return }
+                completion(.success(result.bestTranscription.formattedString))
+                if result.isFinal { self.stopRecording() }
             }
         }
         
@@ -373,14 +328,33 @@ class SpeechRecognizer {
         }
         
         let recordingFormat = inputNode.outputFormat(forBus: 0)
+        // With the mic held by the call, the input format can come back as 0 Hz / 0 channels.
+        // installTap with that format raises an Objective-C exception and kills the app (the crash
+        // seen when a call connected), so fail softly instead.
+        debugLog("[LT] translator mic format: \(recordingFormat)")
+        guard recordingFormat.sampleRate > 0, recordingFormat.channelCount > 0 else {
+            stopRecording()
+            self.recognitionTask = nil
+            self.recognitionRequest = nil
+            self.audioEngine = nil
+            Task { @MainActor in
+                completion(.failure(SpeechRecognitionError.audioEngineError))
+            }
+            return
+        }
         
+        var tapped = 0
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+            tapped += 1
+            if tapped == 1 || tapped % 400 == 0 { debugLog("[LT] translator mic buffers: \(tapped)") }
             self?.recognitionRequest?.append(buffer)
         }
         
         do {
             try audioEngine?.start()
+            debugLog("[LT] translator mic started")
         } catch {
+            debugLog("[LT] translator mic failed to start: \(error)")
             Task { @MainActor in
                 completion(.failure(error))
             }
@@ -389,9 +363,10 @@ class SpeechRecognizer {
     }
     
     func stopRecording() {
+        generation += 1          // anything the stopped session reports later is ignored
         // Stop audio engine safely
         if let audioEngine = audioEngine {
-            audioEngine.stop()
+            if audioEngine.isRunning { audioEngine.stop() }
             audioEngine.inputNode.removeTap(onBus: 0)
         }
         
@@ -401,11 +376,13 @@ class SpeechRecognizer {
         // Cancel recognition task
         recognitionTask?.cancel()
         
-        // Clean up audio session
-        do {
-            try audioSession?.setActive(false, options: .notifyOthersOnDeactivation)
-        } catch {
-            print("Error deactivating audio session: \(error)")
+        // Deactivate the audio session only if we activated it (never mid-call: that cut the call's audio).
+        if let audioSession {
+            do {
+                try audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+            } catch {
+                debugLog("Error deactivating audio session: \(error)")
+            }
         }
         
         // Clear references
@@ -436,12 +413,15 @@ enum TranslationError: Error {
     case invalidImage
     case ocrFailed
     case networkError
+    case consentRequired
 }
 
 enum SpeechRecognitionError: Error {
     case notAuthorized
     case recognizerNotAvailable
     case audioEngineError
+    /// The recognizer delivered its final result and stopped (calls restart it to keep listening).
+    case finished
 }
 
 extension TranslationError: LocalizedError {
@@ -459,6 +439,8 @@ extension TranslationError: LocalizedError {
             return "Failed to extract text from image"
         case .networkError:
             return "Network error occurred"
+        case .consentRequired:
+            return "Please agree to translation data sharing first"
         }
     }
 }
@@ -472,6 +454,8 @@ extension SpeechRecognitionError: LocalizedError {
             return "Speech recognizer not available for the selected language"
         case .audioEngineError:
             return "Error with audio engine"
+        case .finished:
+            return "Listening finished"
         }
     }
 }

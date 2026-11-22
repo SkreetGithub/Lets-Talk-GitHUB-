@@ -13,25 +13,31 @@ struct CallInterfaceView: View {
     @State private var controlsTimer: Timer?
     @State private var callDuration: TimeInterval = 0
     @State private var callTimer: Timer?
+    @StateObject private var liveTranslation = LiveTranslationSession.shared
+    @State private var otherPartyName: String?
+    @State private var otherPartyPhoto: String?
+    // The consent prompt must be shown from the call screen: it sits in its own window above the
+    // app, so the app-level consent sheet opened invisibly behind it and translation never started.
+    @ObservedObject private var consent = AIConsent.shared
     
     let call: Call
     let isIncoming: Bool
     
     var body: some View {
         ZStack {
-            // Background
-            Color.black.ignoresSafeArea()
+            // Background (Settings › Call Interface; "Light" stays dark enough for the white controls)
+            // with slow brand-color glows that swell when the other person speaks.
+            CallAuraBackground(base: callBackground, isLive: callManager.callStatus == .connected)
             
             // Video Views
             videoViews
             
             // Call Info Overlay
             callInfoOverlay
-            
-            // Controls Overlay
-            if showControls {
-                controlsOverlay
-            }
+
+            // Subtitles + controls share one bottom stack so they can never overlap.
+            // The end-call / answer / decline row is always visible; secondary controls auto-hide.
+            controlsOverlay
             
             // Status Overlay
             statusOverlay
@@ -40,14 +46,37 @@ struct CallInterfaceView: View {
             setupCall()
             startControlsTimer()
             startCallTimer()
+            // Answered from the iPhone's call screen: the call can already be connected when this
+            // screen appears, so the "became connected" change below never fires. Start here too.
+            if callManager.callStatus == .connected { liveTranslation.start() }
         }
         .onDisappear {
             stopTimers()
+            liveTranslation.stop()
+        }
+        .task {
+            // Show the other person's name and photo, not their raw user ID.
+            if let user = try? await DatabaseManager.shared.getUser(id: otherPartyId) {
+                otherPartyName = user.name
+                otherPartyPhoto = user.photoURL
+            }
         }
         .onTapGesture {
             toggleControls()
         }
-        .onChange(of: callManager.callStatus) { oldValue, status in
+        .sheet(isPresented: $consent.needsPrompt) {
+            AIConsentView()
+        }
+        .onChange(of: consent.hasConsented) { _, granted in
+            // Start translating as soon as the user agrees mid-call.
+            if granted && callManager.callStatus == .connected { liveTranslation.start() }
+        }
+        .onChange(of: callManager.callStatus) { _, status in
+            if status == .connected {
+                liveTranslation.start()
+            } else if status == .ending || status == .idle {
+                liveTranslation.stop()
+            }
             handleCallStatusChange(status)
         }
     }
@@ -56,25 +85,30 @@ struct CallInterfaceView: View {
     
     private var videoViews: some View {
         ZStack {
-            // Remote video (full screen)
-            if callManager.isInCall && callManager.connectionState == .connected {
+            // Remote video (full screen). Voice calls, and video calls that are still connecting,
+            // show the moving background instead of a black screen.
+            if callManager.isRemoteVideoOn && callManager.isInCall && (callManager.connectionState == .connected || callManager.connectionState == .completed) {
                 RemoteVideoView(remoteVideoView: $remoteVideoView)
                     .ignoresSafeArea()
-            } else {
-                // Placeholder when no video
-                Color.black.ignoresSafeArea()
             }
             
-            // Local video (picture-in-picture)
-            if call.isVideo && callManager.isVideoEnabled {
+            // Local video (picture-in-picture): only once the call is answered and connected,
+            // not while it's ringing or connecting.
+            if callManager.isVideoEnabled && callManager.callStatus == .connected {
+                // Anchored top-right BELOW the name/status row (it used to sit on top of the
+                // connection indicator and translation chip at a fixed screen position).
                 LocalVideoView(localVideoView: $localVideoView)
-                    .frame(width: 120, height: 160)
-                    .cornerRadius(12)
+                    .frame(width: 110, height: 150)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.cornerRadiusS, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.white, lineWidth: 2)
+                        RoundedRectangle(cornerRadius: DS.cornerRadiusS, style: .continuous)
+                            .stroke(Color.white.opacity(0.8), lineWidth: 1.5)
                     )
-                    .position(x: UIScreen.main.bounds.width - 80, y: 100)
+                    .shadow(color: .black.opacity(0.4), radius: 8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.top, 110)
+                    .padding(.trailing, DS.spacingM)
+                    .accessibilityLabel("Your camera preview")
             }
         }
     }
@@ -85,12 +119,14 @@ struct CallInterfaceView: View {
         VStack {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(call.calleeId == authManager.currentUserId ? call.callerId : call.calleeId)
+                    Text(otherPartyName ?? "Let Talk user")
                         .font(.title2)
                         .fontWeight(.semibold)
                         .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     
-                    Text(call.isVideo ? "Video Call" : "Voice Call")
+                    Text(isVideoNow ? "Video Call" : "Voice Call")
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.8))
                     
@@ -103,11 +139,14 @@ struct CallInterfaceView: View {
                 
                 Spacer()
                 
-                // Connection status indicator
-                connectionStatusIndicator
+                VStack(alignment: .trailing, spacing: 8) {
+                    // Connection status indicator
+                    connectionStatusIndicator
+                    LiveTranslationChip(session: liveTranslation)
+                }
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 60)
+            .padding(.horizontal, DS.spacingL)
+            .padding(.top, DS.spacingM)          // safe area already clears the Dynamic Island
             
             Spacer()
         }
@@ -116,53 +155,59 @@ struct CallInterfaceView: View {
     // MARK: - Controls Overlay
     
     private var controlsOverlay: some View {
-        VStack {
+        VStack(spacing: DS.spacingL) {
             Spacer()
             
-            // Call controls
-            HStack(spacing: 40) {
-                // Mute button
-                CallControlButton(
-                    icon: callManager.isAudioEnabled ? "mic.fill" : "mic.slash.fill",
-                    color: .white,
-                    backgroundColor: callManager.isAudioEnabled ? .white.opacity(0.2) : .red,
-                    action: { callManager.toggleAudio() }
-                )
-                
-                // Video button (only for video calls)
-                if call.isVideo {
+
+            // Live translation subtitles sit directly above the controls
+            SubtitleOverlay(session: liveTranslation)
+            
+            // Secondary controls (auto-hide)
+            if showControls {
+                HStack(spacing: 0) {
                     CallControlButton(
-                        icon: callManager.isVideoEnabled ? "video.fill" : "video.slash.fill",
+                        icon: callManager.isAudioEnabled ? "mic.fill" : "mic.slash.fill",
                         color: .white,
-                        backgroundColor: callManager.isVideoEnabled ? .white.opacity(0.2) : .red,
+                        backgroundColor: callManager.isAudioEnabled ? .white.opacity(0.2) : .red,
+                        action: { callManager.toggleAudio() }
+                    )
+                    .frame(maxWidth: .infinity)   // equal share of the row: evenly spaced
+                    
+                    // Camera on/off — also switches a voice call to video and back.
+                    CallControlButton(
+                        icon: callManager.isVideoEnabled ? "video.fill" : "video",
+                        color: .white,
+                        backgroundColor: callManager.isVideoEnabled ? .blue : .white.opacity(0.2),
                         action: { callManager.toggleVideo() }
                     )
-                }
-                
-                // Speaker button
-                CallControlButton(
-                    icon: callManager.isSpeakerEnabled ? "speaker.wave.3.fill" : "speaker.fill",
-                    color: .white,
-                    backgroundColor: callManager.isSpeakerEnabled ? .blue : .white.opacity(0.2),
-                    action: { callManager.toggleSpeaker() }
-                )
-                
-                // Camera switch (only for video calls)
-                if call.isVideo {
+                    .accessibilityLabel(callManager.isVideoEnabled ? "Turn camera off" : "Switch to video")
+                    .frame(maxWidth: .infinity)   // equal share of the row: evenly spaced
+                    
                     CallControlButton(
-                        icon: "camera.rotate.fill",
+                        icon: callManager.isSpeakerEnabled ? "speaker.wave.3.fill" : "speaker.fill",
                         color: .white,
-                        backgroundColor: .white.opacity(0.2),
-                        action: { callManager.switchCamera() }
+                        backgroundColor: callManager.isSpeakerEnabled ? .blue : .white.opacity(0.2),
+                        action: { callManager.toggleSpeaker() }
                     )
+                    .frame(maxWidth: .infinity)   // equal share of the row: evenly spaced
+                    
+                    if callManager.isVideoEnabled {
+                        CallControlButton(
+                            icon: "camera.rotate.fill",
+                            color: .white,
+                            backgroundColor: .white.opacity(0.2),
+                            action: { callManager.switchCamera() }
+                        )
+                    .frame(maxWidth: .infinity)   // equal share of the row: evenly spaced
+                    }
                 }
+                .padding(.horizontal, DS.spacingL)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-            .padding(.bottom, 40)
             
-            // Main action button
+            // Main action row (always visible)
             HStack(spacing: 60) {
                 if isIncoming && callManager.callStatus == .incoming {
-                    // Answer button
                     CallControlButton(
                         icon: "phone.fill",
                         color: .white,
@@ -171,7 +216,6 @@ struct CallInterfaceView: View {
                         action: { answerCall() }
                     )
                     
-                    // Decline button
                     CallControlButton(
                         icon: "phone.down.fill",
                         color: .white,
@@ -180,7 +224,6 @@ struct CallInterfaceView: View {
                         action: { declineCall() }
                     )
                 } else {
-                    // End call button
                     CallControlButton(
                         icon: "phone.down.fill",
                         color: .white,
@@ -190,32 +233,63 @@ struct CallInterfaceView: View {
                     )
                 }
             }
-            .padding(.bottom, 60)
+            .padding(.bottom, DS.spacingXL)
         }
+        .animation(.easeInOut(duration: 0.3), value: showControls)
     }
     
     // MARK: - Status Overlay
     
+    /// Ringing / connecting: the avatar pulses with a soft glow.
+    private var isRinging: Bool {
+        switch callManager.callStatus {
+        case .incoming, .initiating, .answering, .connecting: return true
+        default: return false
+        }
+    }
+    
+    /// The remote video fills the screen once a video call connects; otherwise show the avatar.
+    private var showsRemoteVideo: Bool {
+        callManager.isRemoteVideoOn && callManager.isInCall
+            && (callManager.connectionState == .connected || callManager.connectionState == .completed)
+    }
+    
     private var statusOverlay: some View {
-        VStack {
+        VStack(spacing: DS.spacingL) {
+            Spacer()
+            if !showsRemoteVideo {
+                ZStack {
+                    RingingGlow(active: isRinging)
+                        .frame(width: 120, height: 120)
+                    ProfileImageView(imageURL: otherPartyPhoto,
+                                     placeholderText: Initials.from(otherPartyName ?? ""),
+                                     size: 120)
+                        .overlay(Circle().stroke(Color.white.opacity(0.35), lineWidth: 2))
+                        .shadow(color: .black.opacity(0.3), radius: 16, y: 8)
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
             if callManager.callStatus != .connected && callManager.callStatus != .idle {
-                HStack {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        .scaleEffect(0.8)
-                    
-                    Text(statusText)
+                HStack(spacing: DS.spacingS) {
+                    if callManager.callStatus != .failed && callManager.callStatus != .disconnected {
+                        ProgressView()
+                            .tint(.white)
+                    }
+                    Text(LocalizedStringKey(statusText))
                         .font(.headline)
                         .foregroundColor(.white)
                 }
-                .padding()
-                .background(Color.black.opacity(0.6))
-                .cornerRadius(20)
+                .padding(.horizontal, DS.spacingL)
+                .padding(.vertical, DS.spacingM)
+                .background(Capsule().fill(Color.black.opacity(0.6)))
+                .transition(.opacity)
             }
-            
             Spacer()
+            Spacer()   // sits a little above center, clear of the controls
         }
-        .padding(.top, 200)
+        .allowsHitTesting(false)
+        .animation(.easeInOut(duration: 0.25), value: callManager.callStatus)
+        .animation(.easeInOut(duration: 0.35), value: showsRemoteVideo)
     }
     
     // MARK: - Connection Status Indicator
@@ -226,13 +300,16 @@ struct CallInterfaceView: View {
                 .fill(connectionStatusColor)
                 .frame(width: 8, height: 8)
             
-            Text(connectionStatusText)
+            Text(LocalizedStringKey(connectionStatusText))
                 .font(.caption)
                 .foregroundColor(.white.opacity(0.8))
         }
     }
     
     // MARK: - Computed Properties
+
+    /// Either camera is on (the call started as video, or someone switched to video).
+    private var isVideoNow: Bool { callManager.isVideoEnabled || callManager.isRemoteVideoOn }
     
     private var statusText: String {
         switch callManager.callStatus {
@@ -287,6 +364,11 @@ struct CallInterfaceView: View {
         }
     }
     
+    private var callBackground: Color {
+        let choice = SettingsManager.shared.settings.callInterface.background
+        return choice == .light ? Color(white: 0.35) : choice.color
+    }
+    
     // MARK: - Methods
     
     private func setupCall() {
@@ -296,6 +378,8 @@ struct CallInterfaceView: View {
     }
     
     private func answerCall() {
+        // If the iPhone's call banner is also up, answer through it so it closes too.
+        if CallKitManager.shared.answerIfShowing(callId: call.id) { return }
         Task {
             try? await callManager.answerCall(callId: call.id, isVideo: call.isVideo)
         }
@@ -357,6 +441,16 @@ struct CallInterfaceView: View {
     
     private func handleCallStatusChange(_ status: WebRTCCallStatus) {
         switch status {
+        case .connected:
+            Haptics.success()
+        case .failed:
+            Haptics.failure()
+        case .ended:
+            Haptics.warning()
+        default:
+            break
+        }
+        switch status {
         case .ended, .failed:
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 presentationMode.wrappedValue.dismiss()
@@ -364,6 +458,10 @@ struct CallInterfaceView: View {
         default:
             break
         }
+    }
+    
+    private var otherPartyId: String {
+        call.calleeId == authManager.currentUserId ? call.callerId : call.calleeId
     }
     
     private func formatDuration(_ duration: TimeInterval) -> String {
@@ -384,7 +482,14 @@ struct LocalVideoView: UIViewRepresentable {
     
     func makeUIView(context: Context) -> RTCMTLVideoView {
         localVideoView.videoContentMode = .scaleAspectFill
+        applyMirror(localVideoView)
         return localVideoView
+    }
+    
+    /// Settings › Mirror Front Camera: show your own preview like a mirror (what others see is unchanged).
+    private func applyMirror(_ view: RTCMTLVideoView) {
+        view.transform = SettingsManager.shared.settings.video.mirrorFrontCamera
+            ? CGAffineTransform(scaleX: -1, y: 1) : .identity
     }
     
     func updateUIView(_ uiView: RTCMTLVideoView, context: Context) {

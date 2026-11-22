@@ -13,14 +13,26 @@ class ChatDetailViewModel: ObservableObject {
     @Published var selectedLocation: CLLocationCoordinate2D?
     @Published var selectedContact: Contact?
     @Published var error: Error?
+    /// Shown to the user as an alert when set.
+    @Published var errorMessage: String?
     @Published var contact: Contact
     
     private let chat: Chat
     private let databaseManager = DatabaseManager.shared
-    private let webRTCService = WebRTCService()
     private var cancellables = Set<AnyCancellable>()
     private var audioRecorder: AVAudioRecorder?
     private var audioRecordingURL: URL?
+    /// Messages sent from this phone that the server hasn't returned yet (shown right away).
+    private var pending: [Message] = []
+    /// Read receipts already attempted, so each poll doesn't resend them all.
+    private var readReceiptsSent: Set<String> = []
+    
+    /// The other person in this 1:1 chat: who every message here is addressed to.
+    /// (Messages used to go to `contact.id`, which could still be a random placeholder ID.)
+    var otherUserId: String {
+        let me = AuthManager.shared.currentUserId?.lowercased()
+        return chat.participants.first { $0.lowercased() != me } ?? contact.id
+    }
     
     var messageGroups: [Date: [Message]] {
         Dictionary(grouping: messages) { message in
@@ -30,30 +42,45 @@ class ChatDetailViewModel: ObservableObject {
     
     init(chat: Chat) {
         self.chat = chat
-        self.contact = Contact(name: "", phone: "", email: "") // Placeholder
+        let me = AuthManager.shared.currentUserId?.lowercased()
+        let otherId = chat.participants.first { $0.lowercased() != me } ?? ""
+        // Show the saved contact's name immediately; the profile below fills in the rest.
+        let saved = ContactManager.shared.contacts.first { $0.userId?.lowercased() == otherId.lowercased() }
+        var placeholder = Contact(id: otherId, name: saved?.name ?? "", phone: saved?.phone ?? "", email: saved?.email ?? "")
+        placeholder.userId = otherId
+        self.contact = placeholder
         loadContact()
     }
     
     private func loadContact() {
-        guard let contactId = chat.participants.first(where: { $0 != AuthManager.shared.currentUserId }) else { return }
+        let contactId = otherUserId
+        guard !contactId.isEmpty else { return }
         
         Task {
             do {
-                let contact = try await databaseManager.getUser(id: contactId)
+                let user = try await databaseManager.getUser(id: contactId)
                 await MainActor.run {
-                    self.contact = Contact(
-                        id: contactId, // FIXED: Set the contact ID
-                        name: contact.name,
-                        phone: contact.phone,
-                        email: contact.email,
+                    var loaded = Contact(
+                        id: contactId,
+                        name: user.name,
+                        phone: user.phone,
+                        email: user.email,
                         lastMessage: nil,
                         image: nil
                     )
+                    loaded.userId = contactId
+                    loaded.imageURL = user.photoURL
+                    // Real presence from their profile. The app refreshes last_seen every
+                    // 5 minutes while it's open, so "online" with an older last_seen is stale
+                    // (the app was closed without saying so) and shows as "Last seen" instead.
+                    loaded.lastSeen = user.lastSeen
+                    let recent = user.lastSeen.map { Date().timeIntervalSince($0) < 6 * 60 } ?? false
+                    loaded.isOnline = user.isOnline && recent
+                    self.contact = loaded
                 }
             } catch {
-                await MainActor.run {
-                    self.error = error
-                }
+                // Keep the saved name; the chat still works without the profile.
+                debugLog("Couldn't load chat profile: \(error)")
             }
         }
     }
@@ -71,8 +98,16 @@ class ChatDetailViewModel: ObservableObject {
                     }
                 }
             } receiveValue: { [weak self] messages in
-                self?.messages = messages.sorted { $0.timestamp < $1.timestamp }
-                self?.markMessagesAsRead(messages)
+                guard let self else { return }
+                // Keep messages that are still sending (or failed) on screen until the server has them.
+                let serverIds = Set(messages.map(\.id))
+                self.pending.removeAll { serverIds.contains($0.id) }
+                self.messages = (messages + self.pending).sorted { $0.timestamp < $1.timestamp }
+                self.markMessagesAsRead(messages)
+                // Incoming messages are shown in my language (translated on this phone).
+                Task { @MainActor in
+                    MessageTranslator.shared.translateIncoming(messages, myUserId: AuthManager.shared.currentUserId)
+                }
             }
             .store(in: &cancellables)
     }
@@ -83,17 +118,22 @@ class ChatDetailViewModel: ObservableObject {
     
     private func markMessagesAsRead(_ messages: [Message]) {
         let unreadMessages = messages.filter { message in
-            message.senderId != AuthManager.shared.currentUserId &&
-            message.status != .read
+            message.senderId.lowercased() != AuthManager.shared.currentUserId?.lowercased() &&
+            message.readAt == nil &&
+            !readReceiptsSent.contains(message.id)
         }
         
         guard !unreadMessages.isEmpty else { return }
-        
+        let ids = unreadMessages.map(\.id)
+        readReceiptsSent.formUnion(ids)
+
+        // Runs while the chat is on screen, so a message counts as read once it's been shown.
         Task {
             do {
-                try await databaseManager.markMessagesAsRead(unreadMessages.map { $0.id })
+                try await databaseManager.markMessagesAsRead(ids)
             } catch {
-                self.error = error
+                // Try again on the next refresh.
+                await MainActor.run { self.readReceiptsSent.subtract(ids) }
             }
         }
     }
@@ -102,23 +142,24 @@ class ChatDetailViewModel: ObservableObject {
         guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         
         guard let currentUserId = AuthManager.shared.currentUserId, !currentUserId.isEmpty else {
-            print("Error: User not authenticated")
+            debugLog("Error: User not authenticated")
             return
         }
         
-        guard !contact.id.isEmpty else {
-            print("Error: Contact ID is empty")
+        let receiverId = otherUserId
+        guard !receiverId.isEmpty else {
+            errorMessage = "This chat has no recipient. Close it and start it again from Contacts."
             return
         }
         
-        print("Sending message from \(currentUserId) to \(contact.id): \(messageText)")
-        
-        let message = Message(
+        var message = Message(
             senderId: currentUserId,
-            receiverId: contact.id,
-            content: messageText,
+            receiverId: receiverId,
+            content: messageText.trimmingCharacters(in: .whitespacesAndNewlines),
             type: .text
         )
+        // Tell the receiver which language this is in, so their phone can skip or target translation.
+        message.metadata = ["lang": SettingsManager.shared.settings.language]
         
         send(message)
         messageText = ""
@@ -141,16 +182,19 @@ class ChatDetailViewModel: ObservableObject {
                 
                 let message = Message(
                     senderId: AuthManager.shared.currentUserId ?? "",
-                    receiverId: contact.id,
+                    receiverId: otherUserId,
                     content: "Sent an image",
                     type: .image,
                     attachments: [attachment]
                 )
                 
                 send(message)
-                selectedImage = nil
+                await MainActor.run { self.selectedImage = nil }
             } catch {
-                self.error = error
+                await MainActor.run {
+                    self.selectedImage = nil
+                    self.errorMessage = "Couldn't send the photo. Please try again."
+                }
             }
         }
     }
@@ -166,22 +210,25 @@ class ChatDetailViewModel: ObservableObject {
                     id: messageId,
                     url: uploadedURL,
                     type: .document,
-                    size: try await url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0,
+                    size: try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0,
                     name: url.lastPathComponent
                 )
                 
                 let message = Message(
                     senderId: AuthManager.shared.currentUserId ?? "",
-                    receiverId: contact.id,
+                    receiverId: otherUserId,
                     content: "Sent a document",
                     type: .file,
                     attachments: [attachment]
                 )
                 
                 send(message)
-                selectedDocument = nil
+                await MainActor.run { self.selectedDocument = nil }
             } catch {
-                self.error = error
+                await MainActor.run {
+                    self.selectedDocument = nil
+                    self.errorMessage = "Couldn't send the file. Please try again."
+                }
             }
         }
     }
@@ -191,7 +238,7 @@ class ChatDetailViewModel: ObservableObject {
         
         let message = Message(
             senderId: AuthManager.shared.currentUserId ?? "",
-            receiverId: contact.id,
+            receiverId: otherUserId,
             content: "\(location.latitude),\(location.longitude)",
             type: .location
         )
@@ -201,22 +248,39 @@ class ChatDetailViewModel: ObservableObject {
     }
     
     func sendContact() {
-        guard let contact = selectedContact else { return }
+        guard let shared = selectedContact else { return }
         
-        guard let contactData = try? JSONEncoder().encode(contact),
+        guard let contactData = try? JSONEncoder().encode(shared),
               let contactString = String(data: contactData, encoding: .utf8) else {
             return
         }
         
         let message = Message(
             senderId: AuthManager.shared.currentUserId ?? "",
-            receiverId: contact.id,
+            receiverId: otherUserId,
             content: contactString,
             type: .contact
         )
         
         send(message)
         selectedContact = nil
+    }
+    
+    /// Mic button in the composer: first tap records, second tap sends the voice message.
+    func toggleRecording() {
+        if isRecording {
+            stopRecording()
+            return
+        }
+        AVAudioApplication.requestRecordPermission { granted in
+            DispatchQueue.main.async {
+                if granted {
+                    self.startRecording()
+                } else {
+                    self.errorMessage = "Microphone access is off for Let Talk. Turn it on in Settings › Let Talk › Microphone to send voice messages."
+                }
+            }
+        }
     }
     
     func startRecording() {
@@ -240,16 +304,21 @@ class ChatDetailViewModel: ObservableObject {
             audioRecorder?.record()
             isRecording = true
         } catch {
-            self.error = error
+            errorMessage = "Couldn't start recording. Please try again."
             isRecording = false
         }
     }
     
     func stopRecording() {
+        let duration = audioRecorder?.currentTime ?? 0
         audioRecorder?.stop()
+        audioRecorder = nil
         isRecording = false
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         
         guard let url = audioRecordingURL else { return }
+        audioRecordingURL = nil
+        guard duration >= 0.5 else { return }   // a tap-tap isn't a message
         
         Task {
             do {
@@ -259,52 +328,87 @@ class ChatDetailViewModel: ObservableObject {
                     id: messageId,
                     url: uploadedURL,
                     type: .audio,
-                    size: try await url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0,
+                    size: try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0,
                     name: "Voice Message"
                 )
                 
                 let message = Message(
                     senderId: AuthManager.shared.currentUserId ?? "",
-                    receiverId: contact.id,
+                    receiverId: otherUserId,
                     content: "Sent a voice message",
                     type: .audio,
                     attachments: [attachment]
                 )
                 
                 send(message)
-                audioRecordingURL = nil
             } catch {
-                self.error = error
+                await MainActor.run { self.errorMessage = "Couldn't send the voice message. Please try again." }
             }
         }
     }
     
     private func send(_ message: Message) {
+        // Show it right away as "sending"; the next poll replaces it with the saved copy.
+        var local = message
+        local.status = .sending
+        DispatchQueue.main.async {
+            self.pending.append(local)
+            self.messages.append(local)
+        }
         Task {
             do {
-                try await databaseManager.sendMessage(message)
+                var saved = message
+                saved.status = .sent
+                try await databaseManager.sendMessage(saved)
+                await MainActor.run { self.updatePending(message.id, status: .sent) }
             } catch {
-                self.error = error
+                debugLog("Send failed: \(error)")
+                await MainActor.run {
+                    self.updatePending(message.id, status: .failed)
+                    self.errorMessage = "Your message wasn't sent. Check your connection and try again."
+                }
+                return
             }
+            // Notify the receiver (their notification shows the message in their language).
+            // Best effort: the message is already saved, so a failed push changes nothing.
+            try? await Backend.sendMessagePush(messageId: message.id)
         }
     }
     
-    func startAudioCall() {
-        Task {
-            do {
-                try await webRTCService.startCall(to: contact.phone)
-            } catch {
-                self.error = error
-            }
+    private func updatePending(_ id: String, status: Message.MessageStatus) {
+        if let i = pending.firstIndex(where: { $0.id == id }) { pending[i].status = status }
+        if let i = messages.firstIndex(where: { $0.id == id }), messages[i].status == .sending || status == .failed {
+            messages[i].status = status
         }
+    }
+    
+    /// Sends a failed message again.
+    func retry(_ message: Message) {
+        pending.removeAll { $0.id == message.id }
+        messages.removeAll { $0.id == message.id }
+        var copy = Message(senderId: message.senderId, receiverId: otherUserId, content: message.content,
+                           type: message.type, attachments: message.attachments)
+        copy.metadata = message.metadata
+        send(copy)
+    }
+    
+    // The chat's other participant IS a Let Talk user: call their user ID directly.
+    // (This used to pass contact.phone as the callee ID, so the other phone never rang.)
+    func startAudioCall() {
+        startCall(isVideo: false)
     }
     
     func startVideoCall() {
-        Task {
-            do {
-                try await webRTCService.startVideoCall(to: contact.phone)
-            } catch {
-                self.error = error
+        startCall(isVideo: true)
+    }
+    
+    private func startCall(isVideo: Bool) {
+        let otherUserId = chat.participants.first { $0 != AuthManager.shared.currentUserId }
+        Task { @MainActor in
+            if let otherUserId {
+                CallCoordinator.shared.startCall(toUserId: otherUserId, isVideo: isVideo)
+            } else {
+                CallCoordinator.shared.startCall(to: contact, isVideo: isVideo)
             }
         }
     }
@@ -315,24 +419,17 @@ class ChatDetailViewModel: ObservableObject {
     
     private func uploadDocument(_ url: URL, messageId: String) async throws -> String {
         let data = try Data(contentsOf: url)
-        let fileName = "\(messageId)_\(url.lastPathComponent)"
-        return try await SupabaseStorageService.shared.uploadFile(
+        return try await SupabaseStorageService.shared.uploadChatFile(
             data,
-            fileName: fileName,
-            folder: "chat_files/\(chat.id)",
+            chatId: chat.id,
+            fileName: "\(messageId)_\(url.lastPathComponent)",
             contentType: "application/octet-stream"
         )
     }
     
     private func uploadAudio(_ url: URL, messageId: String) async throws -> String {
         let data = try Data(contentsOf: url)
-        let fileName = "\(messageId).m4a"
-        return try await SupabaseStorageService.shared.uploadFile(
-            data,
-            fileName: fileName,
-            folder: "chat_audio/\(chat.id)",
-            contentType: "audio/mp4"
-        )
+        return try await SupabaseStorageService.shared.uploadVoiceMessage(data, chatId: chat.id, messageId: messageId)
     }
     
     deinit {

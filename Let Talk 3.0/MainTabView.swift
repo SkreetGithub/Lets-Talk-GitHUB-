@@ -1,10 +1,14 @@
 import SwiftUI
+import AVFoundation
 
 struct MainTabView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var notificationManager: NotificationManager
     @EnvironmentObject var settingsManager: SettingsManager
     @StateObject private var tabViewModel = MainTabViewModel()
+    // Owns the call screen for every outgoing and incoming call (and starts call polling).
+    // The call screen lives in its own window (see CallCoordinator), above sheets.
+    @StateObject private var callCoordinator = CallCoordinator.shared
     @State private var selectedTab = Tab.contacts
     @State private var showNewChat = false
     @State private var showSettings = false
@@ -15,7 +19,7 @@ struct MainTabView: View {
     @State private var isTabBarVisible = true
     @State private var lastSelectedTab: Tab = .contacts
     
-    enum Tab: CaseIterable {
+    enum Tab: CaseIterable, Hashable {
         case chats
         case calls
         case contacts
@@ -49,73 +53,61 @@ struct MainTabView: View {
         }
     }
     
+    /// The page the pager is showing. Kept in step with `selectedTab` (tab bar taps scroll the
+    /// pager; swipes update the tab bar).
+    @State private var pagerPosition: Tab?
+    
     var body: some View {
-        NavigationView {
-            ZStack(alignment: .bottom) {
-                // Main Content
-                TabView(selection: $selectedTab) {
-                    // Chats Tab
-                    ComprehensiveChatsView(showNewChat: $showNewChat)
-                        .tag(Tab.chats)
-                        .environmentObject(settingsManager)
-                        .environmentObject(authManager)
-                    
-                    // Calls Tab
-                    CallsView()
-                        .tag(Tab.calls)
-                        .environmentObject(settingsManager)
-                        .environmentObject(authManager)
-                    
-                    // Contacts Tab
-                    ContactsView()
-                        .tag(Tab.contacts)
-                        .environmentObject(settingsManager)
-                        .environmentObject(authManager)
-                    
-                    // Translator Tab
-                    ProfessionalTranslatorView()
-                        .tag(Tab.translator)
-                        .environmentObject(settingsManager)
-                        .environmentObject(authManager)
-                }
-                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-                .animation(.easeInOut(duration: 0.3), value: selectedTab)
-                .gesture(swipeGesture)
-                .onChange(of: selectedTab) { oldValue, newTab in
-                    handleTabChange(newTab)
-                }
-                
-                // Custom Tab Bar
-                if isTabBarVisible {
-                    CustomTabBar(
-                        selectedTab: $selectedTab,
-                        showSettings: $showSettings,
-                        showProfile: $showProfile,
-                        showNotifications: $showNotifications
-                    )
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    HStack {
-                        Text(selectedTab.title)
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                        
-                        Spacer()
-                        
-                        // Tab-specific actions
-                        HStack(spacing: 16) {
-                            tabSpecificActions
-                        }
+        ZStack(alignment: .bottom) {
+            // Swipe between the four tabs with a native paging scroll view (the same UIScrollView
+            // paging iOS uses everywhere): it follows the finger 1:1, settles with the system
+            // spring, and can't get stuck half-way. Every page owns its navigation bar, so the
+            // pager's size never changes mid-swipe (the old shared bar appearing/disappearing
+            // on the Translator page re-laid out the pager while it was moving).
+            ScrollView(.horizontal) {
+                HStack(spacing: 0) {
+                    ForEach(Tab.allCases, id: \.self) { tab in
+                        page(for: tab)
+                            .containerRelativeFrame(.horizontal)
+                            .id(tab)
                     }
                 }
+                .scrollTargetLayout()
+            }
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $pagerPosition)
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .onChange(of: pagerPosition) { _, page in
+                // Swiped to a new page: highlight its tab.
+                if let page, page != selectedTab { selectedTab = page }
+            }
+            // A tapped notification opens its chat: bring the Chats tab forward first.
+            .onReceive(NotificationManager.shared.$pendingChatId) { chatId in
+                if chatId != nil, selectedTab != .chats { selectedTab = .chats }
+            }
+            .onChange(of: selectedTab) { _, newTab in
+                // Tapped a tab: slide the pager there.
+                if pagerPosition != newTab {
+                    withAnimation(.snappy(duration: 0.3)) { pagerPosition = newTab }
+                }
+                handleTabChange(newTab)
+            }
+            
+            // Custom Tab Bar
+            if isTabBarVisible {
+                CustomTabBar(
+                    selectedTab: $selectedTab,
+                    showSettings: $showSettings,
+                    showProfile: $showProfile,
+                    showNotifications: $showNotifications
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .accentColor(.blue)
+        .tint(settingsManager.settings.theme.accent)
         .onAppear {
+            settingsManager.applyTheme(settingsManager.settings.theme)
             tabViewModel.setupUserPresence()
             setupInitialState()
         }
@@ -142,58 +134,51 @@ struct MainTabView: View {
         }
     }
     
-    // MARK: - Tab-Specific Actions
+    // MARK: - Pages
     @ViewBuilder
-    private var tabSpecificActions: some View {
-        switch selectedTab {
+    private func page(for tab: Tab) -> some View {
+        switch tab {
         case .chats:
-            Button(action: { showNewChat = true }) {
-                Image(systemName: "square.and.pencil")
-                    .font(.system(size: 16, weight: .medium))
-            }
-            
+            ComprehensiveChatsView(showNewChat: $showNewChat)
+                .environmentObject(settingsManager)
+                .environmentObject(authManager)
         case .calls:
-            Button(action: { 
-                // Show dialpad for calls
-                // This will be handled by the CallsView
-            }) {
-                Image(systemName: "phone.circle.fill")
-                    .font(.system(size: 16, weight: .medium))
-            }
-            
+            CallsView(isActive: selectedTab == .calls)
+                .environmentObject(settingsManager)
+                .environmentObject(authManager)
         case .contacts:
-            Button(action: { 
-                // Show add contact
-                // This will be handled by the ContactsView
-            }) {
-                Image(systemName: "person.badge.plus")
-                    .font(.system(size: 16, weight: .medium))
-            }
-            
+            ContactsView()
+                .environmentObject(settingsManager)
+                .environmentObject(authManager)
         case .translator:
-            Button(action: { 
-                // Show language selector
-                // This will be handled by the ProfessionalTranslatorView
-            }) {
-                Image(systemName: "globe")
-                    .font(.system(size: 16, weight: .medium))
+            // Its own bar, like the other three tabs.
+            NavigationStack {
+                ProfessionalTranslatorView()
+                    .navigationTitle(Tab.translator.title)
+                    .navigationBarTitleDisplayMode(.inline)
             }
+            .environmentObject(settingsManager)
+            .environmentObject(authManager)
         }
     }
     
     // MARK: - Helper Methods
     private func setupInitialState() {
-        // Set up initial state based on user preferences
+        // Reopen on the last tab used.
         if let lastTab = UserDefaults.standard.string(forKey: "lastSelectedTab"),
            let tab = Tab.allCases.first(where: { $0.title == lastTab }) {
             selectedTab = tab
         }
+        pagerPosition = selectedTab   // jump there without animating across the other pages
     }
     
     private func handleTabChange(_ newTab: Tab) {
         // Save the last selected tab
         UserDefaults.standard.set(newTab.title, forKey: "lastSelectedTab")
         lastSelectedTab = newTab
+        
+        // A keyboard opened on one tab must not stay up on the next one.
+        KeyboardDismisser.dismiss()
         
         // Add haptic feedback
         let impactFeedback = UIImpactFeedbackGenerator(style: .light)
@@ -216,54 +201,6 @@ struct MainTabView: View {
         }
     }
     
-    // MARK: - Tab Navigation Functions
-    private func switchToNextTab() {
-        withAnimation(.easeInOut(duration: 0.3)) {
-            switch selectedTab {
-            case .chats:
-                selectedTab = .calls
-            case .calls:
-                selectedTab = .contacts
-            case .contacts:
-                selectedTab = .translator
-            case .translator:
-                selectedTab = .chats // Loop back to first tab
-            }
-        }
-    }
-    
-    private func switchToPreviousTab() {
-        withAnimation(.easeInOut(duration: 0.3)) {
-            switch selectedTab {
-            case .chats:
-                selectedTab = .translator // Loop back to last tab
-            case .calls:
-                selectedTab = .chats
-            case .contacts:
-                selectedTab = .calls
-            case .translator:
-                selectedTab = .contacts
-            }
-        }
-    }
-    
-    private var swipeGesture: some Gesture {
-        DragGesture()
-            .onEnded { value in
-                let threshold: CGFloat = 50
-                if value.translation.width > threshold {
-                    // Swipe right - go to previous tab
-                    let impactFeedback = UIImpactFeedbackGenerator(style: .light)
-                    impactFeedback.impactOccurred()
-                    switchToPreviousTab()
-                } else if value.translation.width < -threshold {
-                    // Swipe left - go to next tab
-                    let impactFeedback = UIImpactFeedbackGenerator(style: .light)
-                    impactFeedback.impactOccurred()
-                    switchToNextTab()
-                }
-            }
-    }
 }
 
 struct CustomTabBar: View {
@@ -276,17 +213,8 @@ struct CustomTabBar: View {
     
     var body: some View {
         VStack(spacing: 8) {
-            // Page Indicators
-            HStack(spacing: 6) {
-                ForEach(MainTabView.Tab.allCases, id: \.title) { tab in
-                    Circle()
-                        .fill(selectedTab == tab ? tab.color : Color.gray.opacity(0.3))
-                        .frame(width: 6, height: 6)
-                        .scaleEffect(selectedTab == tab ? 1.2 : 1.0)
-                        .animation(.easeInOut(duration: 0.2), value: selectedTab)
-                }
-            }
-            .padding(.top, 8)
+            // (The row of page-indicator dots that sat above the tab bar was removed: the
+            // highlighted tab button already shows which page you're on.)
             
             // Tab Buttons
             HStack(spacing: 0) {
@@ -349,6 +277,15 @@ struct TabButton: View {
     let tab: MainTabView.Tab
     @Binding var selectedTab: MainTabView.Tab
     var namespace: Namespace.ID
+    /// Bumped each time this tab becomes the selected one, which bounces its icon.
+    @State private var bounceCount = 0
+    @ObservedObject private var settings = SettingsManager.shared
+
+    /// Color themes (Ocean, Sunset…) color every tab with the theme; Light/Dark/System keep
+    /// each tab's own color.
+    private var tint: Color {
+        settings.settings.theme.isGradient ? settings.settings.theme.accent : tab.color
+    }
     
     var body: some View {
         Button(action: { 
@@ -359,8 +296,9 @@ struct TabButton: View {
             VStack(spacing: 4) {
                 Image(systemName: tab.icon)
                     .font(.system(size: 18, weight: .medium))
+                    .symbolEffect(.bounce, value: bounceCount)
                 
-                Text(tab.title)
+                Text(LocalizedStringKey(tab.title))
                     .font(.system(size: 10, weight: .medium))
             }
             .foregroundColor(selectedTab == tab ? .white : .gray)
@@ -372,18 +310,21 @@ struct TabButton: View {
                         RoundedRectangle(cornerRadius: 20)
                             .fill(
                                 LinearGradient(
-                                    gradient: Gradient(colors: [tab.color, tab.color.opacity(0.8)]),
+                                    gradient: Gradient(colors: [tint, tint.opacity(0.8)]),
                                     startPoint: .leading,
                                     endPoint: .trailing
                                 )
                             )
                             .matchedGeometryEffect(id: "tab", in: namespace)
-                            .shadow(color: tab.color.opacity(0.3), radius: 8, x: 0, y: 4)
+                            .shadow(color: tint.opacity(0.3), radius: 8, x: 0, y: 4)
                     }
                 }
             )
         }
-        .buttonStyle(PlainButtonStyle())
+        .buttonStyle(PressableStyle())
+        .onChange(of: selectedTab) { _, newTab in
+            if newTab == tab { bounceCount += 1 }
+        }
     }
 }
 
@@ -454,7 +395,7 @@ struct QuickActionButton: View {
                     .font(.system(size: 20, weight: .medium))
                     .foregroundColor(color)
                 
-                Text(title)
+                Text(LocalizedStringKey(title))
                     .font(.system(size: 10, weight: .medium))
                     .foregroundColor(.primary)
             }
@@ -482,7 +423,7 @@ class MainTabViewModel: ObservableObject {
         }
         
         // Start listening for incoming calls (Supabase-backed signaling)
-        FirebaseSignalingService.shared.startListeningForIncomingCalls()
+        SupabaseSignalingService.shared.startListeningForIncomingCalls()
     }
     
     func cleanupUserPresence() {
@@ -635,7 +576,7 @@ struct SettingsView: View {
                                 await MainActor.run {
                                     // Force a UI update to ensure navigation happens
                                     if !authManager.isAuthenticated {
-                                        print("User signed out - AuthView should be showing now")
+                                        debugLog("User signed out - AuthView should be showing now")
                                         // Navigation should already be handled by the main app
                                         // but this ensures it happens
                                     }
@@ -643,7 +584,7 @@ struct SettingsView: View {
                                 
                             } catch {
                                 // Even if there's an error, force dismiss and sign out
-                                print("Sign out error: \(error)")
+                                debugLog("Sign out error: \(error)")
                                 await MainActor.run {
                                     presentationMode.wrappedValue.dismiss()
                                 }
@@ -748,22 +689,48 @@ struct ProfileEditorView: View {
     @State private var isLoading = false
     @State private var showAlert = false
     @State private var alertMessage = ""
+    @State private var showVoiceSettings = false
+    // Profile photo
+    @State private var showPhotoOptions = false
+    @State private var pickerSource: UIImagePickerController.SourceType?
+    @State private var isUploadingPhoto = false
+    @State private var photoError: String?
+    @State private var showCameraDenied = false
+    
+    /// e.g. "Male · Voice 3", or "Not set".
+    private var voiceSummary: String {
+        guard let id = authManager.currentUser?.effectiveVoiceId else { return "Not set" }
+        let parts = id.split(separator: "-")
+        guard parts.count == 2 else { return "Not set" }
+        return "\(parts[0].capitalized) · Voice \(parts[1])"
+    }
     
     var body: some View {
         NavigationView {
             Form {
-                Section("Personal Information") {
+                Section {
+                    photoHeader
+                }
+                .listRowBackground(Color.clear)
+                
+                Section {
                     HStack {
                         Image(systemName: "person.fill")
                             .foregroundColor(.blue)
                         TextField("Full Name", text: $name)
                     }
                     
-                    HStack {
-                        Image(systemName: "phone.fill")
-                            .foregroundColor(.green)
-                        TextField("Phone Number", text: $phone)
-                            .keyboardType(.phonePad)
+                    // Your Let Talk number is changed in Settings › My Let Talk Number (once a year),
+                    // not typed here.
+                    NavigationLink {
+                        MyNumberView().environmentObject(authManager)
+                    } label: {
+                        HStack {
+                            Image(systemName: "phone.fill")
+                                .foregroundColor(.green)
+                            Text(phone.isEmpty ? "Let Talk Number" : phone)
+                                .foregroundColor(.secondary)
+                        }
                     }
                     
                     HStack {
@@ -774,7 +741,63 @@ struct ProfileEditorView: View {
                             .disabled(true)
                             .foregroundColor(.gray)
                     }
+                } header: {
+                    Text("Personal Information")
+                } footer: {
+                    Text("Your email is your sign-in and can't be changed here.")
                 }
+                
+                Section("Voice") {
+                    Button {
+                        showVoiceSettings = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "waveform")
+                                .foregroundColor(.purple)
+                            Text("Voice & Gender")
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Text(voiceSummary)
+                                .foregroundColor(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $showVoiceSettings) {
+                VoiceSettingsView()
+            }
+            .confirmationDialog("Profile Photo", isPresented: $showPhotoOptions, titleVisibility: .visible) {
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    Button("Take Photo") { openCamera() }
+                }
+                Button("Choose from Library") { pickerSource = .photoLibrary }
+                if authManager.currentUser?.photoURL?.isEmpty == false {
+                    Button("Remove Photo", role: .destructive) { removePhoto() }
+                }
+                Button("Cancel", role: .cancel) { }
+            }
+            .fullScreenCover(item: $pickerSource) { source in
+                SystemImagePicker(source: source) { image in uploadPhoto(image) }
+                    .ignoresSafeArea()
+            }
+            .alert("Photo Not Saved", isPresented: Binding(
+                get: { photoError != nil },
+                set: { if !$0 { photoError = nil } }
+            )) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(photoError ?? "")
+            }
+            .alert("Camera Access Needed", isPresented: $showCameraDenied) {
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Turn on Camera for Let Talk in Settings to take a profile photo.")
             }
             .navigationTitle("Edit Profile")
             .navigationBarTitleDisplayMode(.inline)
@@ -796,6 +819,95 @@ struct ProfileEditorView: View {
         }
     }
     
+    /// Tappable 100-pt avatar at the top of Edit Profile.
+    private var photoHeader: some View {
+        VStack(spacing: DS.spacingS) {
+            Button {
+                KeyboardDismisser.dismiss()
+                showPhotoOptions = true
+            } label: {
+                ZStack(alignment: .bottomTrailing) {
+                    ProfileImageView(imageURL: authManager.currentUser?.photoURL,
+                                     placeholderText: Initials.from(name.isEmpty ? (authManager.currentUser?.name ?? "") : name),
+                                     size: 100)
+                        .overlay {
+                            if isUploadingPhoto {
+                                Circle().fill(Color.black.opacity(0.45))
+                                ProgressView().tint(.white).controlSize(.large)
+                            }
+                        }
+                        .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
+                    Image(systemName: "camera.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 32, height: 32)
+                        .background(Circle().fill(Color.blue))
+                        .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 3))
+                        .offset(x: 2, y: 2)
+                }
+            }
+            .buttonStyle(PressableStyle())
+            .disabled(isUploadingPhoto)
+            .accessibilityLabel("Profile photo")
+            .accessibilityHint("Change or remove your photo")
+            
+            Text(isUploadingPhoto ? "Uploading…" : (authManager.currentUser?.photoURL?.isEmpty == false ? "Change Photo" : "Add Photo"))
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.blue)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, DS.spacingS)
+    }
+    
+    private func openCamera() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            pickerSource = .camera
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    if granted { pickerSource = .camera } else { showCameraDenied = true }
+                }
+            }
+        default:
+            showCameraDenied = true
+        }
+    }
+    
+    private func uploadPhoto(_ image: UIImage) {
+        isUploadingPhoto = true
+        Task {
+            do {
+                try await authManager.setProfilePhoto(image)
+                await MainActor.run {
+                    isUploadingPhoto = false
+                    Haptics.success()
+                }
+            } catch {
+                await MainActor.run {
+                    isUploadingPhoto = false
+                    photoError = "Your photo couldn't be uploaded. Check your connection and try again."
+                    Haptics.failure()
+                }
+            }
+        }
+    }
+    
+    private func removePhoto() {
+        isUploadingPhoto = true
+        Task {
+            do {
+                try await authManager.removeProfilePhoto()
+                await MainActor.run { isUploadingPhoto = false }
+            } catch {
+                await MainActor.run {
+                    isUploadingPhoto = false
+                    photoError = "Your photo couldn't be removed. Check your connection and try again."
+                }
+            }
+        }
+    }
+    
     private func loadProfile() {
         guard let user = authManager.currentUser else { return }
         name = user.name
@@ -810,7 +922,6 @@ struct ProfileEditorView: View {
             do {
                 try await authManager.updateUserProfile(
                     name: name,
-                    phone: phone,
                     profileImage: nil
                 )
                 
@@ -926,7 +1037,7 @@ struct ThemeSettingsView: View {
                                         .foregroundColor(.blue)
                                         .frame(width: 24)
                                     
-                                    Text(theme.displayName)
+                                    Text(LocalizedStringKey(theme.displayName))
                                         .foregroundColor(.primary)
                                     
                                     Spacer()
@@ -949,4 +1060,10 @@ struct ThemeSettingsView: View {
             .navigationBarItems(trailing: Button("Done") { dismiss() })
         }
     }
+}
+
+
+/// Lets the photo picker be shown with `.fullScreenCover(item:)`.
+extension UIImagePickerController.SourceType: @retroactive Identifiable {
+    public var id: Int { rawValue }
 }

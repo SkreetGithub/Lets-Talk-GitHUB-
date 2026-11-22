@@ -9,7 +9,12 @@ typealias ActivityID = String
 class NotificationManager: NSObject, ObservableObject {
     static let shared = NotificationManager()
     
-    @Published var currentMessage: (String, String, String?)? // (message, sender, profileImage)
+    /// The in-app banner for a message that arrived while the app is open.
+    @Published var currentMessage: InAppMessage?
+    /// The chat on screen right now (set by the chat screen), so its own messages don't banner.
+    var openChatId: String?
+    /// A chat to open because the user tapped its notification (the Chats tab opens it).
+    @Published var pendingChatId: String?
     @Published var currentCall: CallAttributes.ContentState?
     @Published var showMessageNotification = false
     @Published var showCallNotification = false
@@ -38,23 +43,50 @@ class NotificationManager: NSObject, ObservableObject {
     }
 
     /// Hook called by `AppDelegate` after APNs registration.
-    /// (Firebase/FCM has been removed; if you need remote push, implement your own
-    /// server-side push provider and store this token in Supabase.)
+    /// (Remote push needs a server-side provider; store this token in Supabase.)
     @MainActor
     func didRegisterForRemoteNotifications(token: String) async {
         UserDefaults.standard.set(token, forKey: "apnsToken")
-        // Optional: upload token to backend once Supabase profile storage is migrated.
+        uploadPendingToken()
+    }
+
+    /// Stores this device's APNs token for the signed-in user, so message notifications reach
+    /// it. Called on registration and again after sign-in (registration can happen first).
+    func uploadPendingToken() {
+        guard let token = UserDefaults.standard.string(forKey: "apnsToken"),
+              let userId = AuthManager.shared.currentUserId else { return }
+        struct PushTokenRow: Encodable {
+            let user_id: String
+            let token: String
+            let kind: String
+            let updated_at: String
+        }
+        Task {
+            let row = PushTokenRow(user_id: userId, token: token, kind: "apns",
+                                   updated_at: ISO8601DateFormatter().string(from: Date()))
+            _ = try? await SupabaseManager.client.from("push_tokens").upsert(row).execute()
+        }
     }
     
-    func showMessageNotification(message: String, senderName: String, profileImage: String? = nil) {
-        currentMessage = (message, senderName, profileImage)
-        showMessageNotification = true
-        
-        // Hide notification after delay
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
-            self.showMessageNotification = false
+    func showMessageNotification(message: String, senderName: String, profileImage: String? = nil,
+                                 senderId: String? = nil, chatId: String? = nil, messageId: String? = nil) {
+        let banner = InAppMessage(id: messageId ?? UUID().uuidString, text: message, senderName: senderName,
+                                  senderId: senderId, photo: profileImage, chatId: chatId)
+        DispatchQueue.main.async {
+            self.currentMessage = banner
+            self.showMessageNotification = true
+            // Hide it after 4 seconds (it used to stay on screen for good).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                guard self.currentMessage?.id == banner.id else { return }
+                self.currentMessage = nil
+                self.showMessageNotification = false
+            }
         }
+    }
+    
+    func dismissMessageBanner() {
+        currentMessage = nil
+        showMessageNotification = false
     }
     
     func showCallNotification(caller: String, isVideo: Bool, callerId: String, callerImage: String?) {
@@ -101,11 +133,11 @@ class NotificationManager: NSObject, ObservableObject {
                 }
             }
         } catch {
-            print("Error starting call activity: \(error)")
+            debugLog("Error starting call activity: \(error)")
         }
         #else
         // ActivityKit not available - fallback to regular notifications
-        print("ActivityKit not available on this platform")
+        debugLog("ActivityKit not available on this platform")
         #endif
     }
     
@@ -121,7 +153,7 @@ class NotificationManager: NSObject, ObservableObject {
                 activities.removeValue(forKey: id)
             }
         } catch {
-            print("Error updating call activity: \(error)")
+            debugLog("Error updating call activity: \(error)")
         }
         #endif
     }
@@ -261,7 +293,7 @@ class NotificationManager: NSObject, ObservableObject {
         
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
-                print("Error scheduling notification: \(error)")
+                debugLog("Error scheduling notification: \(error)")
             }
         }
     }
@@ -271,7 +303,7 @@ class NotificationManager: NSObject, ObservableObject {
             let granted = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
             return granted
         } catch {
-            print("Error requesting notification permission: \(error)")
+            debugLog("Error requesting notification permission: \(error)")
             return false
         }
     }
@@ -285,6 +317,27 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         let userInfo = notification.request.content.userInfo
+        
+        // Message pushes from the `send-message-push` function: { aps, type: "message", chat_id,
+        // sender_id, message_id }. While the app is open, show Let Talk's own banner (with the
+        // sender's photo) instead of the system one, and nothing at all for the chat on screen.
+        if (userInfo["type"] as? String) == "message" {
+            let chatId = userInfo["chat_id"] as? String
+            if let chatId, chatId == openChatId {
+                completionHandler([])
+                return
+            }
+            let alert = (userInfo["aps"] as? [String: Any])?["alert"] as? [String: Any]
+            showMessageNotification(
+                message: alert?["body"] as? String ?? notification.request.content.body,
+                senderName: alert?["title"] as? String ?? notification.request.content.title,
+                senderId: userInfo["sender_id"] as? String,
+                chatId: chatId,
+                messageId: userInfo["message_id"] as? String
+            )
+            completionHandler([.list, .sound])
+            return
+        }
         
         if let messageData = userInfo["message"] as? [String: Any],
            let content = messageData["content"] as? String,
@@ -316,6 +369,13 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
     ) {
         let userInfo = response.notification.request.content.userInfo
         
+        // Tapped a message push (from `send-message-push`): open that chat.
+        if (userInfo["type"] as? String) == "message", let chatId = userInfo["chat_id"] as? String {
+            DispatchQueue.main.async { self.pendingChatId = chatId }
+            completionHandler()
+            return
+        }
+        
         if let messageData = userInfo["message"] as? [String: Any],
            let chatId = messageData["chatId"] as? String {
             // Handle message notification tap
@@ -340,6 +400,18 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         
         completionHandler()
     }
+}
+
+// MARK: - In-app message banner
+
+struct InAppMessage: Equatable {
+    let id: String
+    let text: String
+    let senderName: String
+    /// Used to look up the sender's profile photo.
+    let senderId: String?
+    let photo: String?
+    let chatId: String?
 }
 
 // MARK: - Notification Names
@@ -401,9 +473,9 @@ struct NotificationOverlay: ViewModifier {
             if notificationManager.showMessageNotification,
                let message = notificationManager.currentMessage {
                 MessageNotificationView(
-                    message: message.0,
-                    senderName: message.1,
-                    profileImage: message.2
+                    message: message.text,
+                    senderName: message.senderName,
+                    profileImage: message.photo
                 )
                 .transition(.move(edge: .top))
                 .zIndex(1)
@@ -434,9 +506,9 @@ struct MessageNotificationView: View {
         HStack(spacing: 12) {
             ProfileImageView(
                 imageURL: profileImage,
-                placeholderText: String(senderName.prefix(2))
+                placeholderText: Initials.from(senderName),
+                size: 40
             )
-            .frame(width: 40, height: 40)
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(senderName)
@@ -463,9 +535,9 @@ struct CallNotificationView: View {
         HStack(spacing: 12) {
             ProfileImageView(
                 imageURL: callerImage,
-                placeholderText: String(callerName.prefix(2))
+                placeholderText: Initials.from(callerName),
+                size: 40
             )
-            .frame(width: 40, height: 40)
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(callerName)

@@ -11,41 +11,64 @@ struct ChatDetailView: View {
     @State private var showDocumentPicker = false
     @State private var showLocationPicker = false
     @State private var showContactPicker = false
-    @State private var showTranslation = false
-    @State private var messageToTranslate: Message?
     @State private var scrollToBottom = false
+    /// "Is typing" signals for this chat (shows the … bubble).
+    @StateObject private var typing: TypingChannel
+    /// The one-time translation consent has to be shown from this screen: the app-level prompt
+    /// sits behind the full-screen chat, so on a new install messages were never translated.
+    @ObservedObject private var consent = AIConsent.shared
     
     init(chat: Chat) {
         self.chat = chat
         _viewModel = StateObject(wrappedValue: ChatDetailViewModel(chat: chat))
+        _typing = StateObject(wrappedValue: TypingChannel(chatId: chat.id))
     }
     
     var body: some View {
         VStack(spacing: 0) {
             chatHeader
             messagesList
-            messageInputBar
         }
         .navigationBarHidden(true)
         .onAppear {
+            KeyboardDismisser.dismiss()   // don't carry a keyboard over from the previous screen
             viewModel.startListening()
+            typing.start()
+            NotificationManager.shared.openChatId = chat.id     // no banners for the chat on screen
         }
         .onDisappear {
             viewModel.stopListening()
+            typing.stop()
+            if NotificationManager.shared.openChatId == chat.id { NotificationManager.shared.openChatId = nil }
+            if viewModel.isRecording { viewModel.stopRecording() }
         }
-        .sheet(isPresented: $showTranslation) {
-            if let message = messageToTranslate {
-                TranslationView(message: message)
-            }
+        .onChange(of: viewModel.messageText) { _, text in
+            typing.userTyped(text)
         }
-        .actionSheet(isPresented: $showAttachmentPicker) {
-            ActionSheet(title: Text("Add Attachment"), buttons: [
-                .default(Text("Photo/Video")) { showImagePicker = true },
-                .default(Text("Document")) { showDocumentPicker = true },
-                .default(Text("Location")) { showLocationPicker = true },
-                .default(Text("Contact")) { showContactPicker = true },
-                .cancel()
-            ])
+        .confirmationDialog("Send", isPresented: $showAttachmentPicker) {
+            Button("Photo") { showImagePicker = true }
+            Button("Document") { showDocumentPicker = true }
+            Button("My Location") { showLocationPicker = true }
+            Button("Contact") { showContactPicker = true }
+            Button("Cancel", role: .cancel) { }
+        }
+        // Picking something now actually sends it (the pickers used to just store the choice).
+        .onChange(of: viewModel.selectedImage) { _, image in
+            if image != nil { viewModel.sendImage() }
+        }
+        .onChange(of: viewModel.selectedDocument) { _, url in
+            if url != nil { viewModel.sendDocument() }
+        }
+        .onChange(of: viewModel.selectedContact) { _, contact in
+            if contact != nil { viewModel.sendContact() }
+        }
+        .alert("Message", isPresented: Binding(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(viewModel.errorMessage ?? "")
         }
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(selectedImage: $viewModel.selectedImage)
@@ -56,10 +79,17 @@ struct ChatDetailView: View {
             }
         }
         .sheet(isPresented: $showLocationPicker) {
-            LocationPicker(selectedLocation: $viewModel.selectedLocation)
+            LocationPicker { coordinate in
+                viewModel.selectedLocation = coordinate
+                viewModel.sendLocation()
+            }
+            .presentationDetents([.medium])
         }
         .sheet(isPresented: $showContactPicker) {
             ContactPicker(selectedContact: $viewModel.selectedContact)
+        }
+        .sheet(isPresented: $consent.needsPrompt) {
+            AIConsentView()
         }
     }
     
@@ -77,43 +107,80 @@ struct ChatDetailView: View {
     private var messagesList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: DS.spacingS) {
                     ForEach(viewModel.messageGroups.keys.sorted(), id: \.self) { date in
                         Section(header: DateHeader(date: date)) {
                             ForEach(viewModel.messageGroups[date] ?? []) { message in
-                                MessageBubble(
-                                    message: message,
-                                    showTranslation: $showTranslation,
-                                    messageToTranslate: $messageToTranslate
-                                )
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    MessageBubble(message: message, onRetry: { viewModel.retry(message) })
+                                    // "Read 3:42 PM" under my newest message the other person has opened.
+                                    if message.id == lastReadOutgoingId, let readAt = message.readAt {
+                                        Text("Read \(readAt.formatted(date: .omitted, time: .shortened))")
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                            .padding(.trailing, DS.spacingXS)
+                                            .transition(.opacity.combined(with: .offset(y: -4)))
+                                    }
+                                }
                                 .id(message.id)
                             }
                         }
                     }
-                }
-                .padding(.horizontal)
-                .padding(.top)
-            }
-            .onChange(of: viewModel.messages) { oldValue, newValue in
-                if scrollToBottom {
-                    withAnimation {
-                        proxy.scrollTo(viewModel.messages.last?.id, anchor: .bottom)
+                    
+                    if typing.isOtherTyping {
+                        TypingBubble()
+                            .id("typing-indicator")
+                            .transition(.move(edge: .leading).combined(with: .opacity))
                     }
-                    scrollToBottom = false
+                }
+                .padding(.horizontal, DS.spacingM)
+                .padding(.vertical, DS.spacingS)
+                .animation(.easeOut(duration: 0.4), value: lastReadOutgoingId)        // "Read" fades in
+                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: typing.isOtherTyping)
+            }
+            .defaultScrollAnchor(.bottom)                 // open on the newest message, not the oldest
+            .scrollDismissesKeyboard(.interactively)
+            // Composer lives in the bottom safe area: it rides on top of the keyboard with the
+            // system's own keyboard animation, and the last message is never hidden behind it.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                messageInputBar
+            }
+            .onChange(of: viewModel.messages.count) { _, _ in
+                // Scroll for sent AND received messages (it used to scroll only after Send).
+                guard let lastId = viewModel.messages.last?.id else { return }
+                withAnimation(.easeOut(duration: 0.25)) {
+                    proxy.scrollTo(lastId, anchor: .bottom)
+                }
+                scrollToBottom = false
+                typing.messageArrived()
+            }
+            .onChange(of: typing.isOtherTyping) { _, isTyping in
+                guard isTyping else { return }
+                withAnimation(.easeOut(duration: 0.25)) {
+                    proxy.scrollTo("typing-indicator", anchor: .bottom)
                 }
             }
         }
     }
     
+    /// My most recent message that the other person has read.
+    private var lastReadOutgoingId: String? {
+        viewModel.messages.last { $0.isOutgoing && $0.readAt != nil }?.id
+    }
+    
     private var messageInputBar: some View {
         MessageInputBar(
             text: $viewModel.messageText,
-            isRecording: $viewModel.isRecording,
+            isRecording: viewModel.isRecording,
             onSend: {
                 viewModel.sendMessage()
                 scrollToBottom = true
             },
-            onAttachment: { showAttachmentPicker = true }
+            onRecordTap: { viewModel.toggleRecording() },
+            onAttachment: {
+                KeyboardDismisser.dismiss()
+                showAttachmentPicker = true
+            }
         )
     }
 }
@@ -125,19 +192,25 @@ struct ChatHeader: View {
     let onBack: () -> Void
     
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: DS.spacingS) {
             Button(action: onBack) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 20, weight: .semibold))
+                    .frame(width: DS.minTapTarget, height: DS.minTapTarget, alignment: .leading)
             }
+            .accessibilityLabel("Back")
             
-            ProfileImageView(imageURL: contact.imageURL,
-                           placeholderText: contact.initials)
-                .frame(width: 40, height: 40)
+            UserAvatar(userId: contact.userId ?? contact.id, name: contact.name,
+                       fallbackURL: contact.imageURL, size: 32)
             
             VStack(alignment: .leading, spacing: 2) {
+                // One line, shrinking a little before it truncates (long names used to wrap
+                // onto three lines and push the header down).
                 Text(contact.name)
                     .font(.headline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .truncationMode(.tail)
                 
                 if contact.isOnline {
                     Text("Online")
@@ -147,22 +220,36 @@ struct ChatHeader: View {
                     Text("Last seen \(timeAgo(from: lastSeen))")
                         .font(.caption)
                         .foregroundColor(.gray)
+                        .lineLimit(1)
                 }
             }
+            .layoutPriority(1)
             
-            Spacer()
+            Spacer(minLength: 0)
             
+            // The three actions sit flush (each keeps its 44-pt tap area) so the name has room.
+            HStack(spacing: 0) {
             Button(action: onAudioCall) {
                 Image(systemName: "phone")
                     .font(.system(size: 20))
+                    .frame(width: DS.minTapTarget, height: DS.minTapTarget)
             }
+            .accessibilityLabel("Voice call")
             
             Button(action: onVideoCall) {
                 Image(systemName: "video")
                     .font(.system(size: 20))
+                    .frame(width: DS.minTapTarget, height: DS.minTapTarget)
+            }
+            .accessibilityLabel("Video call")
+
+            UserSafetyMenu(userId: contact.id, userName: contact.name)
+                .font(.system(size: 20))
+                .frame(width: DS.minTapTarget, height: DS.minTapTarget)
             }
         }
-        .padding()
+        .padding(.horizontal, DS.spacingS)
+        .padding(.vertical, DS.spacingXS)
         .background(Color(.systemBackground))
         .shadow(radius: 1)
     }
@@ -176,16 +263,41 @@ struct ChatHeader: View {
 
 struct MessageBubble: View {
     let message: Message
-    @Binding var showTranslation: Bool
-    @Binding var messageToTranslate: Message?
+    var onRetry: (() -> Void)? = nil
+    @ObservedObject private var translator = MessageTranslator.shared
+    /// Settings › Chat Bubbles (sent colour, corner radius, font size).
+    @ObservedObject private var settingsManager = SettingsManager.shared
+    private var bubbleStyle: AppSettings.ChatBubbleSettings { settingsManager.settings.chatBubbles }
+    @State private var showOriginal = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Turns true once a brand-new bubble has played its entrance.
+    @State private var hasEntered = false
+    /// Tilt of the bubble while it flips between the translation and the original.
+    @State private var flipAngle: Double = 0
+    
+    /// Only messages that just arrived animate in; history appears in place.
+    private var isFresh: Bool {
+        Date().timeIntervalSince(message.timestamp) < (message.isOutgoing ? 3 : 12)
+    }
+    private var entered: Bool { hasEntered || !isFresh }
     
     var body: some View {
+        if message.type == .system {
+            // System notices are centered, not drawn as a sent/received bubble.
+            systemContent
+                .frame(maxWidth: .infinity)
+        } else {
+            bubbleRow
+        }
+    }
+    
+    private var bubbleRow: some View {
         HStack {
             if message.isOutgoing {
-                Spacer()
+                Spacer(minLength: 48)   // bubbles stop ~48pt short of the far edge, like Messages
             }
             
-            VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: 4) {
+            VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: DS.spacingXS) {
                 switch message.type {
                 case .text:
                     textContent
@@ -205,49 +317,118 @@ struct MessageBubble: View {
                     systemContent
                 }
                 
-                HStack(spacing: 4) {
+                HStack(spacing: DS.spacingXS) {
                     Text(message.formattedTime)
                         .font(.caption2)
-                        .foregroundColor(.gray)
+                        .foregroundColor(message.isOutgoing ? .white.opacity(0.8) : .secondary)
                     
                     if message.isOutgoing {
+                        // Was blue on the blue bubble (invisible).
                         Image(systemName: statusIcon)
                             .font(.caption2)
-                            .foregroundColor(message.status == .failed ? .red : .blue)
+                            .foregroundColor(.white.opacity(message.status == .failed ? 1 : 0.8))
+                            .accessibilityLabel(statusText)
                     }
                 }
             }
-            .padding(10)
+            .padding(.horizontal, 12)
+            .padding(.vertical, DS.spacingS)
             .background(bubbleBackground)
-            .cornerRadius(16)
+            .clipShape(RoundedRectangle(cornerRadius: CGFloat(bubbleStyle.cornerRadius), style: .continuous))
+            .rotation3DEffect(.degrees(flipAngle), axis: (x: 1, y: 0, z: 0), perspective: 0.5)
             .contextMenu {
                 messageContextMenu
             }
+            // Sent bubbles spring up from the corner; received bubbles slide in from the left.
+            .scaleEffect(!entered && message.isOutgoing && !reduceMotion ? 0.5 : 1,
+                         anchor: message.isOutgoing ? .bottomTrailing : .bottomLeading)
+            .offset(x: !entered && !message.isOutgoing && !reduceMotion ? -70 : 0)
+            .opacity(entered ? 1 : 0)
             
             if !message.isOutgoing {
-                Spacer()
+                Spacer(minLength: 48)
             }
+        }
+        .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+        .onAppear {
+            guard !hasEntered else { return }
+            guard isFresh else {
+                hasEntered = true
+                return
+            }
+            let entrance: Animation = reduceMotion
+                ? .easeOut(duration: 0.2)
+                : (message.isOutgoing
+                    ? .spring(response: 0.38, dampingFraction: 0.6)
+                    : .spring(response: 0.45, dampingFraction: 0.82))
+            withAnimation(entrance) { hasEntered = true }
         }
     }
     
+    /// Flips the bubble over to swap between the translation and what the sender typed.
+    private func flipOriginal() {
+        guard !reduceMotion else {
+            withAnimation(.easeInOut(duration: 0.15)) { showOriginal.toggle() }
+            return
+        }
+        Haptics.tap()
+        withAnimation(.easeIn(duration: 0.16)) { flipAngle = 90 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+            showOriginal.toggle()
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.7)) { flipAngle = 0 }
+        }
+    }
+    
+    private var statusText: String {
+        switch message.status {
+        case .sending: return "Sending"
+        case .sent: return "Sent"
+        case .delivered: return "Delivered"
+        case .read: return "Read"
+        case .failed: return "Failed to send"
+        }
+    }
+    
+    /// Incoming messages are shown in my language; "Show Original" reveals what the sender typed.
     private var textContent: some View {
-        Text(message.content)
-            .foregroundColor(message.isOutgoing ? .white : .primary)
-            .fixedSize(horizontal: false, vertical: true)
+        let translated = message.isOutgoing ? nil : translator.translation(for: message)
+        return VStack(alignment: .leading, spacing: DS.spacingXS) {
+            Text(showOriginal ? message.content : (translated ?? message.content))
+                .font(.system(size: CGFloat(bubbleStyle.fontSize)))
+                .foregroundColor(message.isOutgoing ? .white : .primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+
+            if translated != nil {
+                Button {
+                    flipOriginal()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "translate")
+                        Text(showOriginal ? L("Show Translation") : translationLabel)
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundColor(.accentColor)
+                    .frame(minHeight: 28)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(showOriginal ? "Shows the message in your language" : "Shows the message as it was sent")
+            }
+        }
+    }
+
+    private var translationLabel: String {
+        if let name = translator.sourceLanguageName(for: message) {
+            return String(format: L("Translated from %@ · Show Original"), name)
+        }
+        return L("Translated · Show Original")
     }
     
     private var imageContent: some View {
         Group {
-            if let url = message.attachments?.first?.url {
-                AsyncImage(url: URL(string: url)) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(maxWidth: 200, maxHeight: 200)
-                        .cornerRadius(8)
-                } placeholder: {
-                    ProgressView()
-                }
+            if let reference = message.attachments?.first?.url {
+                ChatMediaImage(reference: reference)
             } else {
                 EmptyView()
             }
@@ -256,8 +437,8 @@ struct MessageBubble: View {
     
     private var videoContent: some View {
         Group {
-            if let url = message.attachments?.first?.url {
-                VideoThumbnail(url: URL(string: url)!)
+            if let string = message.attachments?.first?.url, let url = URL(string: string) {
+                VideoThumbnail(url: url)
                     .frame(width: 200, height: 150)
                     .cornerRadius(8)
             } else {
@@ -268,8 +449,8 @@ struct MessageBubble: View {
     
     private var audioContent: some View {
         Group {
-            if let url = message.attachments?.first?.url {
-                AudioPlayer(url: URL(string: url)!)
+            if let reference = message.attachments?.first?.url {
+                AudioPlayer(reference: reference)
                     .frame(width: 200, height: 50)
             } else {
                 EmptyView()
@@ -280,16 +461,26 @@ struct MessageBubble: View {
     private var fileContent: some View {
         Group {
             if let attachment = message.attachments?.first {
-                HStack {
-                    Image(systemName: "doc")
-                    VStack(alignment: .leading) {
-                        Text(attachment.name)
-                            .lineLimit(1)
-                        Text(formatFileSize(attachment.size))
-                            .font(.caption)
-                            .foregroundColor(.gray)
+                // Tap to open (private files open through a 1-hour signed link).
+                Button {
+                    Task {
+                        if let url = try? await SupabaseStorageService.shared.url(for: attachment.url) {
+                            await UIApplication.shared.open(url)
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: "doc")
+                        VStack(alignment: .leading) {
+                            Text(attachment.name)
+                                .lineLimit(1)
+                            Text(formatFileSize(attachment.size))
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
                     }
                 }
+                .buttonStyle(.plain)
             } else {
                 EmptyView()
             }
@@ -313,7 +504,8 @@ struct MessageBubble: View {
     
     private var contactContent: some View {
         Group {
-            if let contact = try? JSONDecoder().decode(Contact.self, from: message.content.data(using: .utf8)!) {
+            if let data = message.content.data(using: .utf8),
+               let contact = try? JSONDecoder().decode(Contact.self, from: data) {
                 HStack {
                     Image(systemName: "person.circle")
                     VStack(alignment: .leading) {
@@ -343,7 +535,7 @@ struct MessageBubble: View {
         Group {
             if message.isOutgoing {
                 LinearGradient(
-                    gradient: Gradient(colors: [.blue, .blue.opacity(0.8)]),
+                    gradient: Gradient(colors: [bubbleStyle.sentColor.color, bubbleStyle.sentColor.color.opacity(0.8)]),
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -372,31 +564,19 @@ struct MessageBubble: View {
         Group {
             if message.type == .text {
                 Button(action: {
-                    UIPasteboard.general.string = message.content
+                    UIPasteboard.general.string = showOriginal
+                        ? message.content
+                        : (translator.translation(for: message) ?? message.content)
                 }) {
                     Label("Copy", systemImage: "doc.on.doc")
                 }
-                
-                Button(action: {
-                    messageToTranslate = message
-                    showTranslation = true
-                }) {
-                    Label("Translate", systemImage: "text.bubble")
-                }
+                // The old "Translate" item showed fake text ("Translated: …"); incoming messages
+                // are now translated automatically, with Show Original on the bubble.
             }
-            
-            if message.isOutgoing && message.status == .failed {
-                Button(action: {
-                    // Implement retry logic
-                }) {
-                    Label("Retry", systemImage: "arrow.clockwise")
+            if message.isOutgoing && message.status == .failed, let onRetry {
+                Button(action: onRetry) {
+                    Label("Send Again", systemImage: "arrow.clockwise")
                 }
-            }
-            
-            Button(role: .destructive, action: {
-                // Implement delete logic
-            }) {
-                Label("Delete", systemImage: "trash")
             }
         }
     }
@@ -411,54 +591,83 @@ struct MessageBubble: View {
 
 struct MessageInputBar: View {
     @Binding var text: String
-    @Binding var isRecording: Bool
+    let isRecording: Bool
     let onSend: () -> Void
+    let onRecordTap: () -> Void
     let onAttachment: () -> Void
     @FocusState private var isFocused: Bool
     
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .bottom, spacing: DS.spacingS) {
             Button(action: onAttachment) {
-                Image(systemName: "plus.circle")
-                    .font(.system(size: 24))
+                Image(systemName: "plus")
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.blue)
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(Color(.systemGray6)))
             }
+            .buttonStyle(PressableStyle())
+            .accessibilityLabel("Add attachment")
             
-            if isRecording {
-                recordingView
-            } else {
-                textInputView
+            Group {
+                if isRecording {
+                    recordingView
+                } else {
+                    textInputView
+                }
             }
+            .animation(.easeInOut(duration: 0.2), value: isRecording)
             
             Button(action: {
-                if text.isEmpty {
-                    isRecording.toggle()
+                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    onRecordTap()   // used to flip a flag only: "Recording..." showed but nothing recorded
                 } else {
                     onSend()
                 }
             }) {
-                Image(systemName: text.isEmpty ? (isRecording ? "stop.circle.fill" : "mic.circle.fill") : "arrow.up.circle.fill")
-                    .font(.system(size: 24))
+                Image(systemName: hasText ? "arrow.up.circle.fill" : (isRecording ? "stop.circle.fill" : "mic.circle.fill"))
+                    .font(.system(size: 32))
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundColor(isRecording ? .red : .blue)
+                    .contentTransition(.symbolEffect(.replace))
             }
+            .buttonStyle(PressableStyle())
+            .accessibilityLabel(hasText ? "Send" : (isRecording ? "Stop recording" : "Record voice message"))
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(Color(.systemBackground))
-        .shadow(radius: 1)
+        .padding(.horizontal, DS.spacingM)
+        .padding(.vertical, DS.spacingS)
+        .background(.bar)                                 // system blur, like Messages
+        .overlay(alignment: .top) { Divider() }
+        .keepsKeyboardOpen()                              // tapping Send doesn't close the keyboard
+    }
+    
+    private var hasText: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
     
     private var textInputView: some View {
-        TextField("Message", text: $text)
-            .textFieldStyle(.roundedBorder)
+        // Grows up to 5 lines as you type, then scrolls.
+        TextField("Message", text: $text, axis: .vertical)
+            .lineLimit(1...5)
             .focused($isFocused)
+            .padding(.horizontal, 12)
+            .padding(.vertical, DS.spacingS)
+            .frame(minHeight: 36)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color(.systemGray6))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color(.separator), lineWidth: 0.5)
+            )
     }
     
     private var recordingView: some View {
         HStack {
             Image(systemName: "waveform")
                 .foregroundColor(.red)
-            Text("Recording...")
+            Text("Recording… tap ■ to send")
                 .foregroundColor(.red)
             Spacer()
         }
@@ -493,35 +702,7 @@ struct DateHeader: View {
 }
 
 // MARK: - Missing Components
-struct TranslationView: View {
-    let message: Message
-    @Environment(\.presentationMode) var presentationMode
-    @StateObject private var viewModel = TranslationViewModel()
-    
-    var body: some View {
-        NavigationView {
-            VStack {
-                Text("Original: \(message.content)")
-                    .padding()
-                
-                if viewModel.isTranslating {
-                    ProgressView()
-                } else {
-                    Text("Translation: \(viewModel.translatedText)")
-                        .padding()
-                }
-            }
-            .navigationTitle("Translation")
-            .navigationBarItems(trailing: Button("Done") {
-                presentationMode.wrappedValue.dismiss()
-            })
-        }
-        .onAppear {
-            viewModel.translate(text: message.content)
-        }
-    }
-}
-
+// (TranslationViewModel is still used by VideoStreamView.)
 class TranslationViewModel: ObservableObject {
     @Published var translatedText = ""
     @Published var isTranslating = false
@@ -578,38 +759,147 @@ struct ImagePicker: UIViewControllerRepresentable {
 
 // Note: DocumentPicker is defined in OfflineIndicatorView.swift
 
+/// Shares the user's current location (the old screen said "Location Picker" and did nothing).
 struct LocationPicker: View {
-    @Binding var selectedLocation: CLLocationCoordinate2D?
-    @Environment(\.presentationMode) var presentationMode
+    let onSend: (CLLocationCoordinate2D) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var locator = OneShotLocator()
     
     var body: some View {
         NavigationView {
-            VStack {
-                Text("Location Picker")
-                // Implement location picker
+            VStack(spacing: DS.spacingL) {
+                Image(systemName: "location.circle.fill")
+                    .font(.system(size: 56))
+                    .foregroundColor(.blue)
+                Group {
+                    switch locator.state {
+                    case .locating:
+                        HStack(spacing: DS.spacingS) {
+                            ProgressView()
+                            Text("Finding your location…")
+                        }
+                    case .found:
+                        Text("Your current location is ready to send.")
+                    case .denied:
+                        Text("Location access is off for Let Talk. Turn it on in Settings › Let Talk › Location.")
+                    case .failed:
+                        Text("Couldn't find your location. Move somewhere with a clearer view of the sky and try again.")
+                    }
+                }
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                
+                Button {
+                    if let coordinate = locator.coordinate {
+                        onSend(coordinate)
+                        dismiss()
+                    }
+                } label: {
+                    Text("Send My Location")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: DS.primaryButtonHeight)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(locator.coordinate == nil)
+                
+                if locator.state == .denied {
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }
+                }
             }
-            .navigationTitle("Select Location")
-            .navigationBarItems(trailing: Button("Done") {
-                presentationMode.wrappedValue.dismiss()
-            })
+            .padding(DS.spacingL)
+            .navigationTitle("Share Location")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .onAppear { locator.start() }
+    }
+}
+
+/// Asks for "While Using" permission once, then reports a single location fix.
+final class OneShotLocator: NSObject, ObservableObject, CLLocationManagerDelegate {
+    enum State { case locating, found, denied, failed }
+    @Published var state: State = .locating
+    @Published var coordinate: CLLocationCoordinate2D?
+    private let manager = CLLocationManager()
+    
+    override init() {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+    }
+    
+    func start() {
+        switch manager.authorizationStatus {
+        case .notDetermined: manager.requestWhenInUseAuthorization()
+        case .denied, .restricted: state = .denied
+        default: manager.requestLocation()
+        }
+    }
+    
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways: manager.requestLocation()
+        case .denied, .restricted: DispatchQueue.main.async { self.state = .denied }
+        default: break
+        }
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else { return }
+        DispatchQueue.main.async {
+            self.coordinate = location.coordinate
+            self.state = .found
+        }
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        DispatchQueue.main.async {
+            if self.coordinate == nil { self.state = .failed }
         }
     }
 }
 
+/// Pick one of your saved contacts to share in the chat (was a placeholder screen).
 struct ContactPicker: View {
     @Binding var selectedContact: Contact?
-    @Environment(\.presentationMode) var presentationMode
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var contactManager = ContactManager.shared
     
     var body: some View {
         NavigationView {
-            VStack {
-                Text("Contact Picker")
-                // Implement contact picker
+            Group {
+                if contactManager.contacts.isEmpty {
+                    ContentUnavailableView("No Contacts", systemImage: "person.2",
+                                           description: Text("Add contacts in the Contacts tab first."))
+                } else {
+                    List(contactManager.contacts) { contact in
+                        Button {
+                            selectedContact = contact
+                            dismiss()
+                        } label: {
+                            ContactRow(contact: contact)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .listStyle(.plain)
+                }
             }
-            .navigationTitle("Select Contact")
-            .navigationBarItems(trailing: Button("Done") {
-                presentationMode.wrappedValue.dismiss()
-            })
+            .navigationTitle("Share Contact")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
         }
     }
 }
@@ -628,34 +918,138 @@ struct VideoThumbnail: View {
     }
 }
 
+/// Plays a voice message (the old view only drew a play icon).
 struct AudioPlayer: View {
-    let url: URL
+    /// Attachment reference (private voice messages are opened through a signed URL).
+    let reference: String
+    @StateObject private var playback = VoiceMessagePlayback()
+    @State private var loading = false
     
     var body: some View {
-        HStack {
-            Image(systemName: "play.circle.fill")
-                .font(.system(size: 30))
-            Text("Audio Message")
-            Spacer()
+        Button {
+            if playback.isPlaying { playback.stop(); return }
+            guard !loading else { return }
+            loading = true
+            Task {
+                let url = try? await SupabaseStorageService.shared.url(for: reference)
+                await MainActor.run {
+                    loading = false
+                    if let url { playback.toggle(url) }
+                }
+            }
+        } label: {
+            HStack {
+                Image(systemName: playback.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.system(size: 30))
+                Text(playback.isPlaying ? "Playing…" : "Voice Message")
+                Spacer()
+            }
+            .padding()
+            .background(Color.gray.opacity(0.3))
+            .cornerRadius(8)
         }
-        .padding()
-        .background(Color.gray.opacity(0.3))
-        .cornerRadius(8)
+        .buttonStyle(.plain)
+        .accessibilityLabel(playback.isPlaying ? "Pause voice message" : "Play voice message")
+        .onDisappear { playback.stop() }
     }
 }
 
+final class VoiceMessagePlayback: ObservableObject {
+    @Published var isPlaying = false
+    private var player: AVPlayer?
+    private var endObserver: NSObjectProtocol?
+    
+    func toggle(_ url: URL) {
+        if isPlaying { stop(); return }
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+        try? AVAudioSession.sharedInstance().setActive(true)
+        let item = AVPlayerItem(url: url)
+        let player = AVPlayer(playerItem: item)
+        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+            self?.stop()
+        }
+        self.player = player
+        player.play()
+        isPlaying = true
+    }
+    
+    func stop() {
+        player?.pause()
+        player = nil
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        endObserver = nil
+        isPlaying = false
+    }
+}
+
+/// A photo from a chat. Private photos are loaded through a 1-hour signed URL.
+struct ChatMediaImage: View {
+    let reference: String
+    @State private var url: URL?
+    @State private var failed = false
+    
+    var body: some View {
+        Group {
+            if let url {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(maxWidth: 200, maxHeight: 200)
+                            .cornerRadius(8)
+                    case .failure:
+                        unavailable
+                    default:
+                        ProgressView().frame(width: 200, height: 150)
+                    }
+                }
+            } else if failed {
+                unavailable
+            } else {
+                ProgressView().frame(width: 200, height: 150)
+            }
+        }
+        .task(id: reference) {
+            do {
+                url = try await SupabaseStorageService.shared.url(for: reference)
+            } catch {
+                failed = true
+            }
+        }
+    }
+    
+    private var unavailable: some View {
+        Label("Photo unavailable", systemImage: "photo")
+            .font(.caption)
+            .foregroundColor(.secondary)
+            .frame(width: 200, height: 80)
+    }
+}
+
+/// Tap to open the shared location in Apple Maps.
 struct MapThumbnail: View {
     let latitude: Double
     let longitude: Double
     
     var body: some View {
-        VStack {
-            Image(systemName: "map.fill")
-                .font(.system(size: 40))
-            Text("Location")
+        Button {
+            if let url = URL(string: "http://maps.apple.com/?ll=\(latitude),\(longitude)&q=Shared%20Location") {
+                UIApplication.shared.open(url)
+            }
+        } label: {
+            VStack {
+                Image(systemName: "map.fill")
+                    .font(.system(size: 40))
+                Text("Location · Tap to Open")
+                    .font(.caption)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.gray.opacity(0.3))
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.gray.opacity(0.3))
+        .buttonStyle(.plain)
+        .accessibilityLabel("Shared location. Opens in Maps")
     }
 }
 

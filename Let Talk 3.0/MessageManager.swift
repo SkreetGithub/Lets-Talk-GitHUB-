@@ -147,7 +147,7 @@ final class MessageManager: ObservableObject {
         do {
             try await DatabaseManager.shared.markMessagesAsRead([messageId])
         } catch {
-            print("Error marking message as read: \(error)")
+            debugLog("Error marking message as read: \(error)")
         }
     }
 
@@ -161,7 +161,7 @@ final class MessageManager: ObservableObject {
         do {
             try await DatabaseManager.shared.markMessagesAsRead(unreadMessages.map { $0.id })
         } catch {
-            print("Error marking messages as read: \(error)")
+            debugLog("Error marking messages as read: \(error)")
         }
     }
 
@@ -184,6 +184,7 @@ final class MessageManager: ObservableObject {
 
     // MARK: - Demo Data
 
+    #if DEBUG
     func loadDemoMessages() {
         let demoMessages: [String: [Message]] = [
             "demo-1": [
@@ -200,6 +201,7 @@ final class MessageManager: ObservableObject {
 
         messages = demoMessages
     }
+    #endif
 }
 
 enum MessageError: Error, LocalizedError {

@@ -92,8 +92,7 @@ struct LanguageRowView: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 16) {
-                Text(language.flag)
-                    .font(.system(size: 32))
+                FlagView(flag: language.flag, height: 28)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(language.name)
@@ -154,9 +153,9 @@ struct LanguagePresetsView: View {
                             isPresented = false
                         }) {
                             HStack {
-                                Text(combination.sourceLanguage.flag)
+                                FlagView(flag: combination.sourceLanguage.flag, height: 18)
                                 Text("→")
-                                Text(combination.targetLanguage.flag)
+                                FlagView(flag: combination.targetLanguage.flag, height: 18)
                                 Text(combination.name)
                                     .foregroundColor(.primary)
                                 Spacer()
@@ -207,9 +206,9 @@ struct PresetRowView: View {
     var body: some View {
         Button(action: onTap) {
             HStack {
-                Text(preset.sourceLanguage.flag)
+                FlagView(flag: preset.sourceLanguage.flag, height: 18)
                 Text("→")
-                Text(preset.targetLanguage.flag)
+                FlagView(flag: preset.targetLanguage.flag, height: 18)
                 Text(preset.name)
                     .foregroundColor(.primary)
                 Spacer()
@@ -254,7 +253,7 @@ struct AddPresetView: View {
                 Section("Source Language") {
                     Button(action: { showingSourceSelector = true }) {
                         HStack {
-                            Text(selectedSourceLanguage.flag)
+                            FlagView(flag: selectedSourceLanguage.flag, height: 18)
                             Text(selectedSourceLanguage.name)
                             Spacer()
                             Image(systemName: "chevron.right")
@@ -266,7 +265,7 @@ struct AddPresetView: View {
                 Section("Target Language") {
                     Button(action: { showingTargetSelector = true }) {
                         HStack {
-                            Text(selectedTargetLanguage.flag)
+                            FlagView(flag: selectedTargetLanguage.flag, height: 18)
                             Text(selectedTargetLanguage.name)
                             Spacer()
                             Image(systemName: "chevron.right")

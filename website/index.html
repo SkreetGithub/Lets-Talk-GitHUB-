@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="apple-itunes-app" content="app-id=6835005338">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Let Talk — Translated calls and messages</title>
+    <meta name="description" content="Let Talk is an iPhone app for voice calls, video calls and messages translated between languages in real time.">
+    <meta name="google-site-verification" content="9x-XtTyKPGSqFimft6JwlMXCR11QjxjgAgYCCISIP4k" />
+    <link rel="canonical" href="https://lettalkapp.com/">
+    <meta name="robots" content="index, follow">
+    <meta name="theme-color" content="#ffb300">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Let Talk">
+    <meta property="og:url" content="https://lettalkapp.com/">
+    <meta property="og:title" content="Let Talk — Translated calls and messages">
+    <meta property="og:description" content="Talk with anyone in their own language. Let Talk translates your voice calls, video calls and messages in real time on iPhone.">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Let Talk — Translated calls and messages">
+    <meta name="twitter:description" content="Talk with anyone in their own language. Let Talk translates your voice calls, video calls and messages in real time on iPhone.">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "MobileApplication",
+      "name": "Let Talk",
+      "description": "Real-time translation for video calls, voice calls and messages on iPhone.",
+      "url": "https://lettalkapp.com/",
+      "operatingSystem": "iOS",
+      "applicationCategory": "UtilitiesApplication",
+      "offers": {
+        "@type": "Offer",
+        "price": "4.99",
+        "priceCurrency": "USD"
+      }
+    }
+    </script>
+    <script>document.documentElement.className = 'js';</script>
+    <link rel="stylesheet" href="/landing-styles.css">
+</head>
+<body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="header" id="top">
+        <div class="wrap header-row">
+            <a class="logo" href="#top" aria-label="Let Talk home">
+                <span class="logo-icon" aria-hidden="true">🍌</span>
+                <span class="logo-text">Let Talk</span>
+            </a>
+            <nav class="nav" aria-label="Main">
+                <a href="#story" class="link">How it works</a>
+                <a href="#features" class="link">Features</a>
+                <a href="#voice" class="link">Coming in 2.0</a>
+                <a href="#about" class="link">About</a>
+                <a href="/support" class="link">Support</a>
+            </nav>
+            <a href="https://apps.apple.com/us/app/let-talk-translate-calls/id6835005338" class="btn btn-primary btn-small">Get the app</a>
+        </div>
+    </header>
+
+    <main id="main">
+
+    <!-- 1. HERO -->
+    <section class="hero" id="hero">
+        <div class="glow glow-a" aria-hidden="true"></div>
+        <div class="glow glow-b" aria-hidden="true"></div>
+        <div class="wrap hero-grid">
+            <div class="hero-copy">
+                <p class="eyebrow">Real-time translation for iPhone</p>
+                <h1 class="hero-title">Say it.<br><span class="grad">They hear it in their language.</span></h1>
+                <p class="hero-sub">Let Talk translates your voice calls, video calls and messages as you speak, so you can talk with anyone in their own language.</p>
+
+                <div class="demo-controls">
+                    <p class="demo-label" id="chips-label">Tap a language and watch it translate</p>
+                    <div class="chips" role="group" aria-labelledby="chips-label">
+                        <button class="chip is-on" type="button" data-lang="es" aria-pressed="true">Spanish</button>
+                        <button class="chip" type="button" data-lang="ja" aria-pressed="false">Japanese</button>
+                        <button class="chip" type="button" data-lang="fr" aria-pressed="false">French</button>
+                        <button class="chip" type="button" data-lang="ar" aria-pressed="false">Arabic</button>
+                        <button class="chip" type="button" data-lang="pt" aria-pressed="false">Portuguese</button>
+                        <button class="chip" type="button" data-lang="ko" aria-pressed="false">Korean</button>
+                    </div>
+                    <form class="try" id="try-form" autocomplete="off">
+                        <label class="sr" for="try-input">Type a phrase to translate</label>
+                        <input id="try-input" type="text" list="try-phrases" placeholder="Type anything…" maxlength="80">
+                        <datalist id="try-phrases"></datalist>
+                        <button class="btn btn-dark btn-small" type="submit">Translate</button>
+                    </form>
+                    <p class="try-note" id="try-note" role="status" aria-live="polite"></p>
+                </div>
+
+                <div class="hero-cta">
+                    <a href="https://apps.apple.com/us/app/let-talk-translate-calls/id6835005338" class="btn btn-primary">Get the app <span class="arrow" aria-hidden="true">→</span></a>
+                    <a href="#story" class="link link-strong">See how it works</a>
+                </div>
+            </div>
+
+            <div class="hero-phone">
+                <div class="phone" id="demo-phone">
+                    <div class="screen">
+                        <div class="notch" aria-hidden="true"></div>
+                        <div class="chat-head">
+                            <span class="avatar" id="demo-avatar" aria-hidden="true">S</span>
+                            <span class="chat-who"><b id="demo-name">Sofía</b><small>online</small></span>
+                        </div>
+                        <div class="chat-body" aria-live="polite">
+                            <p class="tag tag-right">You say</p>
+                            <div class="bubble out"><span id="demo-out">I miss you. When are you coming home?</span><span class="caret" aria-hidden="true"></span></div>
+                            <p class="tag" id="demo-tag">Sofía reads it in Spanish</p>
+                            <div class="bubble in" id="demo-in-bubble"><span id="demo-in" lang="es">Te extraño. ¿Cuándo vuelves a casa?</span></div>
+                        </div>
+                        <div class="chat-input" aria-hidden="true"><span>Message</span><i></i></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 2. THE PROBLEM -->
+    <section class="wall" id="wall" aria-label="The language barrier">
+        <div class="wall-pin">
+            <div class="wall-stage" aria-hidden="true">
+                <div class="wall-bubble wall-left">¿Me entiendes?</div>
+                <div class="wall-line"></div>
+                <div class="wall-bubble wall-right">わかりますか？</div>
+                <div class="wall-merged">Do you understand me? <b>Yes. Perfectly.</b></div>
+            </div>
+            <h2 class="wall-title">7,000 languages.<br><span class="grad">One conversation.</span></h2>
+            <p class="wall-sub">The people you most want to talk to don't always share your language. That used to end the conversation.</p>
+        </div>
+    </section>
+
+    <!-- 3. SCROLL STORY -->
+    <section class="story" id="story">
+        <div class="wrap">
+            <div class="section-head" data-reveal>
+                <p class="eyebrow">How it works</p>
+                <h2>You talk. Let Talk translates.</h2>
+            </div>
+            <div class="story-grid">
+                <div class="story-sticky">
+                    <div class="phone story-phone" aria-hidden="true">
+                        <div class="screen">
+                            <div class="notch"></div>
+
+                            <div class="scene scene-chat is-on" data-scene="0">
+                                <div class="chat-head"><span class="avatar">C</span><span class="chat-who"><b>Camille</b><small>online</small></span></div>
+                                <div class="chat-body">
+                                    <div class="bubble in">Tu arrives quand à Paris ?<em>When do you get to Paris?</em></div>
+                                    <div class="bubble out">Friday morning. Can't wait!<em>Vendredi matin. J'ai hâte !</em></div>
+                                    <p class="read">Read 2:41 PM</p>
+                                    <div class="bubble in">Je viens te chercher 🚗<em>I'll come pick you up 🚗</em></div>
+                                </div>
+                                <div class="chat-input"><span>Message</span><i></i></div>
+                            </div>
+
+                            <div class="scene scene-call" data-scene="1">
+                                <p class="call-state">Voice call · 04:12</p>
+                                <div class="call-avatar">M</div>
+                                <p class="call-name">Mamá</p>
+                                <div class="bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                                <p class="call-pill">Spanish → English</p>
+                                <p class="call-caption">"Did you eat today, my love?"</p>
+                                <div class="call-buttons"><span></span><span class="end"></span><span></span></div>
+                            </div>
+
+                            <div class="scene scene-video" data-scene="2">
+                                <div class="video-person"><img src="/assets/videocall-yuki.jpg" alt="" width="620" height="1150" loading="lazy" decoding="async"></div>
+                                <div class="video-pip"><img src="/assets/videocall-self.jpg" alt="" width="450" height="600" loading="lazy" decoding="async"></div>
+                                <p class="video-name">Yuki · Tokyo</p>
+                                <div class="subs">
+                                    <small lang="ja">会議は三時からです。</small>
+                                    <span>The meeting starts at three.</span>
+                                </div>
+                                <div class="call-buttons"><span></span><span class="end"></span><span></span></div>
+                            </div>
+
+                            <div class="scene scene-qr" data-scene="3">
+                                <p class="qr-title">My QR code</p>
+                                <div class="qr" id="qr"></div>
+                                <p class="qr-sub">Scan to add me on Let Talk</p>
+                                <div class="qr-added"><span class="avatar">R</span><span><b>Rafael added</b><small>Say olá 👋</small></span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <ol class="rail" aria-hidden="true"><li class="is-on"></li><li></li><li></li><li></li></ol>
+                </div>
+
+                <div class="story-steps">
+                    <article class="step is-on" data-step="0">
+                        <p class="step-num">01 · Messages</p>
+                        <h3>Text in your language. They read it in theirs.</h3>
+                        <p>Every message arrives translated, with the original one tap away. Read receipts show when it's been seen.</p>
+                    </article>
+                    <article class="step" data-step="1">
+                        <p class="step-num">02 · Voice calls</p>
+                        <h3>Call home, even when home speaks another language.</h3>
+                        <p>Speak normally. The other person hears your words translated, and you hear theirs.</p>
+                    </article>
+                    <article class="step" data-step="2">
+                        <p class="step-num">03 · Video calls</p>
+                        <h3>Face to face, with live subtitles.</h3>
+                        <p>See each other and follow along with translated subtitles as the conversation happens.</p>
+                    </article>
+                    <article class="step" data-step="3">
+                        <p class="step-num">04 · QR add</p>
+                        <h3>Meet someone. Scan. Start talking.</h3>
+                        <p>Show your QR code and they're in your contacts in a second. No typing numbers across a language gap.</p>
+                    </article>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FEATURES -->
+    <section class="features" id="features">
+        <div class="wrap">
+            <div class="section-head" data-reveal>
+                <p class="eyebrow">In version 1.0</p>
+                <h2>Everything you need to be understood</h2>
+            </div>
+            <div class="grid grid-3">
+                <article class="card" data-reveal>
+                    <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="12" height="12" rx="3"/><path d="M15 10l6-3v10l-6-3"/></svg></span>
+                    <h3>Translated video calls</h3>
+                    <p>One-on-one video with live translated subtitles and translated speech.</p>
+                </article>
+                <article class="card" data-reveal>
+                    <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-3 2a12 12 0 005 5l2-3 5 2v4a2 2 0 01-2 2A16 16 0 013 6a2 2 0 012-2z"/></svg></span>
+                    <h3>Translated voice calls</h3>
+                    <p>Talk naturally and hear each other in your own languages.</p>
+                </article>
+                <article class="card" data-reveal>
+                    <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg></span>
+                    <h3>Translated messages</h3>
+                    <p>Messages show up in the reader's language, with read receipts.</p>
+                </article>
+                <article class="card" data-reveal>
+                    <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg></span>
+                    <h3>Pick your translated voice</h3>
+                    <p>Choose the voice people hear when your words are translated, from 8 male and 8 female voices.</p>
+                </article>
+                <article class="card" data-reveal>
+                    <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 12.500V17a4 4 0 008 0V7a2.500 2.500 0 00-5 0v9.500a1 1 0 002 0V8"/></svg></span>
+                    <h3>Share anything</h3>
+                    <p>Send photos, voice messages, files, contacts and your location.</p>
+                </article>
+                <article class="card" data-reveal>
+                    <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span>
+                    <h3>Private by design</h3>
+                    <p>Calls are encrypted in transit, your photos and voice messages are private to your chat, and you can delete your account at any time.</p>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <!-- 4. VOICE CLONING TEASER -->
+    <section class="voice" id="voice">
+        <div class="wrap voice-grid">
+            <div class="voice-copy" data-reveal>
+                <p class="eyebrow eyebrow-light">Coming in 2.0</p>
+                <h2>Your voice.<br><span class="grad">Every language.</span></h2>
+                <p>Soon, you'll be able to speak in your own voice, in any language. The person you're calling will hear the translation sound like you.</p>
+            </div>
+
+            <div class="voice-panel" data-reveal>
+                <div class="wave-card">
+                    <div class="wave-top">
+                        <span class="badge">Illustration</span>
+                    </div>
+                    <div class="wave-row">
+                        <button type="button" class="play" id="play" aria-label="Play sample">
+                            <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l12 7-12 7z"/></svg>
+                            <svg class="i-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
+                        </button>
+                        <div class="wave" id="wave" aria-hidden="true"></div>
+                    </div>
+                    <p class="wave-line" id="wave-line"><span data-part="0">"Hello, how are you?"</span> → <span data-part="1" lang="es">"Hola, ¿cómo estás?"</span></p>
+                    <p class="wave-note" id="wave-note">One sample voice in two languages, to show the idea. Voice cloning isn't available yet.</p>
+                </div>
+
+                <div class="glow-border">
+                    <form class="signup" name="waitlist" method="POST" data-netlify="true" netlify-honeypot="bot-field" data-success="You're on the list. We'll email you when voice cloning arrives.">
+                        <input type="hidden" name="form-name" value="waitlist">
+                        <p class="hp"><label>Leave this empty <input name="bot-field" tabindex="-1" autocomplete="off"></label></p>
+                        <label for="wl-email">Join the 2.0 waitlist</label>
+                        <div class="signup-row">
+                            <input id="wl-email" type="email" name="email" placeholder="you@example.com" required autocomplete="email">
+                            <button class="btn btn-primary" type="submit">Join</button>
+                        </div>
+                        <p class="signup-msg" role="status" aria-live="polite"></p>
+                        <div class="confetti" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 5. USE CASES -->
+    <section class="uses" id="uses">
+        <div class="wrap">
+            <div class="section-head" data-reveal>
+                <p class="eyebrow">Who it's for</p>
+                <h2>For the conversations that matter</h2>
+            </div>
+            <div class="grid grid-4">
+                <article class="card use" data-reveal>
+                    <span class="use-ico u-home"><svg viewBox="0 0 48 48" aria-hidden="true"><path class="roof" d="M8 24L24 10l16 14"/><path d="M13 22v16h22V22"/><path class="heart" d="M24 34s-5-3.2-5-6.4a2.7 2.7 0 015-1.3 2.7 2.7 0 015 1.3c0 3.200-5 6.400-5 6.400z"/></svg></span>
+                    <h3>Family abroad</h3>
+                    <p>Talk with grandparents, in-laws and cousins who speak another language.</p>
+                </article>
+                <article class="card use" data-reveal>
+                    <span class="use-ico u-plane"><svg viewBox="0 0 48 48" aria-hidden="true"><path class="trail" d="M6 36c8-2 14-6 20-12"/><path class="plane" d="M40 8L22 26l-8-2-4 4 9 3 3 9 4-4-2-8L42 10z"/></svg></span>
+                    <h3>Travel</h3>
+                    <p>Call your host, your driver or a new friend without a phrasebook.</p>
+                </article>
+                <article class="card use" data-reveal>
+                    <span class="use-ico u-work"><svg viewBox="0 0 48 48" aria-hidden="true"><rect x="7" y="16" width="34" height="22" rx="4"/><path d="M18 16v-4h12v4"/><path class="pulse-line" d="M7 26h12l3-5 4 10 3-5h12"/></svg></span>
+                    <h3>Business</h3>
+                    <p>Meet clients and suppliers in their language, face to face on video.</p>
+                </article>
+                <article class="card use" data-reveal>
+                    <span class="use-ico u-love"><svg viewBox="0 0 48 48" aria-hidden="true"><path class="h1" d="M18 34s-10-6-10-13a5.500 5.500 0 0110-3 5.500 5.500 0 0110 3c0 7-10 13-10 13z"/><path class="h2" d="M32 30s-7-4.200-7-9.100a3.900 3.900 0 017-2.100 3.900 3.900 0 017 2.100c0 4.900-7 9.100-7 9.100z"/></svg></span>
+                    <h3>Dating across languages</h3>
+                    <p>Get to know someone without the language getting in the way.</p>
+                </article>
+            </div>
+        </div>
+
+        <div class="ticker" aria-label="Hello in 30 languages. Now on the App Store.">
+            <div class="ticker-track" id="ticker" aria-hidden="true"></div>
+        </div>
+    </section>
+
+    <!-- ABOUT -->
+    <section class="about" id="about">
+        <div class="wrap about-grid">
+            <div data-reveal>
+                <p class="eyebrow">Our mission</p>
+                <h2>Language should never stand between people.</h2>
+            </div>
+            <div class="about-points" data-reveal>
+                <div>
+                    <h3>Stay connected</h3>
+                    <p>Keep in touch with the people who matter most to you, wherever they are in the world.</p>
+                </div>
+                <div>
+                    <h3>Privacy first</h3>
+                    <p>We never sell your data, and you can delete your account at any time. <a class="link" href="/privacy">Read the privacy policy</a></p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="download" id="download">
+        <div class="wrap download-inner" data-reveal>
+            <span class="app-icon" aria-hidden="true">🍌</span>
+            <h2>Start the conversation.</h2>
+            <p class="download-sub">Available now on the App Store for iPhone. $4.99 once. No subscription.</p>
+            <a class="store" href="https://apps.apple.com/us/app/let-talk-translate-calls/id6835005338" aria-label="Download on the App Store">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.400 12.600c0-2.500 2-3.600 2.100-3.700-1.200-1.700-3-1.900-3.600-1.900-1.500-.2-3 .9-3.700.9-.8 0-2-.9-3.200-.9-1.700 0-3.200 1-4 2.400-1.700 3-.4 7.400 1.200 9.800.8 1.200 1.800 2.500 3 2.400 1.200 0 1.700-.8 3.100-.8 1.500 0 1.900.8 3.200.8 1.300 0 2.200-1.200 3-2.400.900-1.400 1.300-2.700 1.300-2.800-.100 0-2.400-.900-2.400-3.800zM14 5.300c.600-.800 1.100-1.900 1-3-1 0-2.100.600-2.800 1.400-.600.700-1.200 1.800-1 2.900 1.100.100 2.100-.500 2.800-1.300z"/></svg>
+                <span><small>Download on the</small><b>App Store</b></span>
+            </a>
+        </div>
+    </section>
+
+    </main>
+
+    <footer class="footer">
+        <div class="wrap footer-grid">
+            <div class="footer-brand">
+                <a class="logo" href="#top"><span class="logo-icon" aria-hidden="true">🍌</span><span class="logo-text">Let Talk</span></a>
+                <p>Translated voice calls, video calls and messages for iPhone.</p>
+                <form class="signup signup-footer" name="newsletter" method="POST" data-netlify="true" netlify-honeypot="bot-field" data-success="Thank you. You're subscribed.">
+                    <input type="hidden" name="form-name" value="newsletter">
+                    <p class="hp"><label>Leave this empty <input name="bot-field" tabindex="-1" autocomplete="off"></label></p>
+                    <label for="nl-email">Get launch news</label>
+                    <div class="signup-row">
+                        <input id="nl-email" type="email" name="email" placeholder="you@example.com" required autocomplete="email">
+                        <button class="btn btn-primary btn-small" type="submit">Subscribe</button>
+                    </div>
+                    <p class="signup-msg" role="status" aria-live="polite"></p>
+                </form>
+            </div>
+            <nav aria-label="Product">
+                <h4>Product</h4>
+                <ul>
+                    <li><a class="link" href="#story">How it works</a></li>
+                    <li><a class="link" href="#features">Features</a></li>
+                    <li><a class="link" href="#voice">Coming in 2.0</a></li>
+                    <li><a class="link" href="https://apps.apple.com/us/app/let-talk-translate-calls/id6835005338">Download</a></li>
+                </ul>
+            </nav>
+            <nav aria-label="Company">
+                <h4>Company</h4>
+                <ul>
+                    <li><a class="link" href="#about">About</a></li>
+                    <li><a class="link" href="mailto:lettalksupport@gmail.com">Contact</a></li>
+                </ul>
+            </nav>
+            <nav aria-label="Support">
+                <h4>Support</h4>
+                <ul>
+                    <li><a class="link" href="/support">Help Center</a></li>
+                    <li><a class="link" href="/privacy">Privacy Policy</a></li>
+                    <li><a class="link" href="/terms">Terms of Service</a></li>
+                </ul>
+            </nav>
+        </div>
+        <div class="wrap footer-bottom">
+            <p>&copy; 2026 Let Talk. All rights reserved.</p>
+            <p class="made">Made with <span class="beat" aria-label="love">♥</span> in Atlanta</p>
+            <p class="version">Version 1.0 (1)</p>
+        </div>
+    </footer>
+
+    <script src="/landing.js" defer></script>
+</body>
+</html>

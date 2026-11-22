@@ -1,3 +1,4 @@
+#if DEBUG
 import SwiftUI
 import WebRTC
 
@@ -103,7 +104,7 @@ struct CallTestingView: View {
                     }
                 }
                 .padding()
-                .background(Color.white)
+                .background(Color(.secondarySystemBackground))
                 .cornerRadius(15)
                 .shadow(radius: 5)
                 
@@ -239,7 +240,7 @@ struct CallTestingView: View {
                     showCallInterface = true
                 }
             } catch {
-                print("Error starting call: \(error)")
+                debugLog("Error starting call: \(error)")
             }
         }
     }
@@ -328,3 +329,5 @@ struct CallTestingView_Previews: PreviewProvider {
             .environmentObject(AuthManager.shared)
     }
 }
+
+#endif

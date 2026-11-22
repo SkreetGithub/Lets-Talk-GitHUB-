@@ -13,11 +13,26 @@
 
 /* Begin PBXFileReference section */
 		F2A3F5092EF47A6B00FBF7D7 /* Let Talk 3.0.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Let Talk 3.0.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C3D4E5F60718293A4C01 /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4C02 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		F2A3F5AA2EF47A6B00FBF7D7 /* Exceptions for "Let Talk 3.0" folder in "Let Talk 3.0" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = F2A3F5082EF47A6B00FBF7D7 /* Let Talk 3.0 */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		F2A3F50B2EF47A6B00FBF7D7 /* Let Talk 3.0 */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F2A3F5AA2EF47A6B00FBF7D7 /* Exceptions for "Let Talk 3.0" folder in "Let Talk 3.0" target */,
+			);
 			path = "Let Talk 3.0";
 			sourceTree = "<group>";
 		};
@@ -40,6 +55,8 @@
 			isa = PBXGroup;
 			children = (
 				F2A3F50B2EF47A6B00FBF7D7 /* Let Talk 3.0 */,
+				A1B2C3D4E5F60718293A4C01 /* Secrets.xcconfig */,
+				A1B2C3D4E5F60718293A4C02 /* Info.plist */,
 				F2A3F50A2EF47A6B00FBF7D7 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -60,7 +77,6 @@
 			buildConfigurationList = F2A3F5192EF47A6E00FBF7D7 /* Build configuration list for PBXNativeTarget "Let Talk 3.0" */;
 			buildPhases = (
 				F2A3F5052EF47A6B00FBF7D7 /* Sources */,
-				F2A3F50D2EF47A6B00FBF7D7 /* Exclude Info.plist from Resources */,
 				F2A3F5062EF47A6B00FBF7D7 /* Frameworks */,
 				F2A3F5072EF47A6B00FBF7D7 /* Resources */,
 			);
@@ -101,6 +117,17 @@
 			knownRegions = (
 				en,
 				Base,
+				es,
+				fr,
+				de,
+				it,
+				pt,
+				ru,
+				ja,
+				ko,
+				"zh-Hans",
+				ar,
+				hi,
 			);
 			mainGroup = F2A3F5002EF47A6A00FBF7D7;
 			minimizedProjectReferenceProxies = 1;
@@ -127,28 +154,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXShellScriptBuildPhase section */
-		F2A3F50D2EF47A6B00FBF7D7 /* Exclude Info.plist from Resources */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Exclude Info.plist from Resources";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# This script ensures Info.plist is NOT in Copy Bundle Resources\n# Info.plist should only be processed via INFOPLIST_FILE build setting\necho \"Checking Info.plist configuration...\"\n";
-		};
-/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		F2A3F5052EF47A6B00FBF7D7 /* Sources */ = {
@@ -282,18 +287,19 @@
 		};
 		F2A3F51A2EF47A6E00FBF7D7 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A1B2C3D4E5F60718293A4C01 /* Secrets.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Let Talk 3.0/Let Talk 3.0.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_ASSET_PATHS = "\"Let Talk 3.0/Preview Content\"";
 				DEVELOPMENT_TEAM = 976FG4J66Z;
 				ENABLE_PREVIEWS = YES;
 				EXCLUDED_SOURCE_FILE_NAMES = Info.plist;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "Let Talk 3.0/Info.plist";
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -304,28 +310,29 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.waliexchange.letalk3";
+				PRODUCT_BUNDLE_IDENTIFIER = com.upappllc.lettalk;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
 		F2A3F51B2EF47A6E00FBF7D7 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A1B2C3D4E5F60718293A4C01 /* Secrets.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Let Talk 3.0/Let Talk 3.0.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_ASSET_PATHS = "\"Let Talk 3.0/Preview Content\"";
 				DEVELOPMENT_TEAM = 976FG4J66Z;
 				ENABLE_PREVIEWS = YES;
 				EXCLUDED_SOURCE_FILE_NAMES = Info.plist;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "Let Talk 3.0/Info.plist";
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -336,11 +343,11 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.waliexchange.letalk3";
+				PRODUCT_BUNDLE_IDENTIFIER = com.upappllc.lettalk;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -370,7 +377,7 @@
 /* Begin XCRemoteSwiftPackageReference section */
 		F2A3F50F2EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/supabase/supabase-swift";
+			repositoryURL = "https://github.com/supabase/supabase-swift.git";
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 2.0.0;
@@ -378,10 +385,10 @@
 		};
 		F2A3F5112EF47A6B00FBF7D7 /* XCRemoteSwiftPackageReference "WebRTC" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/stasel/WebRTC";
+			repositoryURL = "https://github.com/stasel/WebRTC.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 114.0.0;
+				minimumVersion = 139.0.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

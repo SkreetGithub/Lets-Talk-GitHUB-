@@ -13,6 +13,8 @@ struct Message: Identifiable, Codable, Hashable {
     var attachments: [Attachment]?
     var isEncrypted: Bool
     var metadata: [String: String]?
+    /// When the receiver opened it (set on the server by `mark_message_read`). Nil = not read yet.
+    var readAt: Date?
     
     enum MessageType: String, Codable {
         case text
@@ -103,12 +105,14 @@ struct Message: Identifiable, Codable, Hashable {
     }
     
     // Sample messages for preview
+    #if DEBUG
     static var sampleMessages: [Message] = [
         Message(senderId: "user1", receiverId: "user2", content: "Hey, how are you?"),
         Message(senderId: "user2", receiverId: "user1", content: "I'm good, thanks! How about you?", status: .read),
         Message(senderId: "user1", receiverId: "user2", content: "Doing great! Want to catch up later?"),
         Message(senderId: "user2", receiverId: "user1", content: "Sure, that sounds good!", status: .delivered)
     ]
+    #endif
 }
 
 // MARK: - Message Encryption Extension

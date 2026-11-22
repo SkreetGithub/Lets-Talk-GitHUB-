@@ -2,46 +2,85 @@ import SwiftUI
 import AVFoundation
 
 struct CallsView: View {
+    /// True while the Calls tab is the page on screen. The tabs live side by side in a pager,
+    /// so `onAppear` only runs once; this is how the list knows the tab was opened again.
+    var isActive: Bool = true
     @StateObject private var viewModel = CallsViewModel()
     @State private var showDialpad = false
     @State private var searchText = ""
     @State private var selectedCall: CallRecord?
     @State private var showCallDetails = false
+    @State private var chatToOpen: Chat?
+    @State private var chatError: String?
     
     var body: some View {
-        ZStack {
-            if viewModel.isLoading {
-                ProgressView()
-            } else if viewModel.calls.isEmpty {
-                EmptyCallsView()
-            } else {
-                callsList
-            }
+        // Own navigation bar so the search field sits at the top under the title (see ContactsView).
+        NavigationStack {
+            ZStack {
+                if viewModel.isLoading {
+                    ProgressView()
+                } else if viewModel.calls.isEmpty {
+                    EmptyCallsView()
+                } else {
+                    callsList
+                }
             
-            // Floating Action Button
-            VStack {
-                Spacer()
-                HStack {
+                // Floating Action Button
+                VStack {
                     Spacer()
-                    Button(action: { showDialpad = true }) {
-                        Image(systemName: "phone.circle.fill")
-                            .font(.system(size: 50))
-                            .foregroundColor(.blue)
-                            .shadow(radius: 3)
+                    HStack {
+                        Spacer()
+                        Button(action: { showDialpad = true }) {
+                            Image(systemName: "phone.circle.fill")
+                                .font(.system(size: 56))
+                                .symbolRenderingMode(.palette)
+                                .foregroundStyle(.white, .blue)
+                                .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+                        }
+                        .buttonStyle(PressableStyle())
+                        .accessibilityLabel("Open dial pad")
+                        .padding(.trailing, DS.spacingL)          // was flush against the screen edge
+                        .padding(.bottom, DS.floatingTabBarClearance)
                     }
-                    .padding(.bottom, 100) // Add bottom padding to avoid tab bar
                 }
             }
+            .navigationTitle("Calls")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText,
+                        placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "Search calls")
         }
-        .searchable(text: $searchText, prompt: "Search calls")
         .sheet(isPresented: $showDialpad) {
             EnhancedDialpadView(isPresented: $showDialpad)
         }
         .sheet(item: $selectedCall) { call in
             CallDetailsView(call: call)
         }
-        .refreshable {
+        .fullScreenCover(item: $chatToOpen) { chat in
+            ChatDetailView(chat: chat)
+        }
+        .alert("Can't Open Chat", isPresented: Binding(
+            get: { chatError != nil },
+            set: { if !$0 { chatError = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(chatError ?? "")
+        }
+        .logoRefreshable {
             await viewModel.refreshCalls()
+        }
+        .onAppear {
+            // Show calls made since the tab was last opened.
+            Task { await viewModel.refreshCalls() }
+        }
+        .onChange(of: isActive) { _, active in
+            // Switched to the Calls tab: reload, so calls made since show up.
+            if active { Task { await viewModel.refreshCalls() } }
+        }
+        .onReceive(CallCoordinator.shared.$presentation) { presentation in
+            // A call screen just closed: add that call to the list.
+            if presentation == nil { Task { await viewModel.refreshCalls() } }
         }
     }
     
@@ -52,31 +91,69 @@ struct CallsView: View {
                     ForEach(groupedCalls[date] ?? []) { call in
                         CallRow(call: call)
                             .contentShape(Rectangle())
-                            .onTapGesture {
+                            .tapGlow {
                                 selectedCall = call
                             }
-                            .swipeActions(edge: .trailing) {
+                            // Swipe left: Delete. Swipe right: Call back.
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
                                     viewModel.deleteCall(call)
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
                             }
-                            .swipeActions(edge: .leading) {
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                Button {
+                                    viewModel.initiateCall(to: call.contact)
+                                } label: {
+                                    Label("Call", systemImage: "phone.fill")
+                                }
+                                .tint(.green)
+                            }
+                            // Long-press: Call / Video / Message / Delete.
+                            .contextMenu {
                                 Button {
                                     viewModel.initiateCall(to: call.contact)
                                 } label: {
                                     Label("Call", systemImage: "phone")
                                 }
-                                .tint(.green)
+                                Button {
+                                    viewModel.initiateCall(to: call.contact, isVideo: true)
+                                } label: {
+                                    Label("Video Call", systemImage: "video")
+                                }
+                                Button {
+                                    openChat(with: call.contact)
+                                } label: {
+                                    Label("Message", systemImage: "message")
+                                }
+                                Divider()
+                                Button(role: .destructive) {
+                                    viewModel.deleteCall(call)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                     }
                 }
             }
         }
         .listStyle(.plain)
+        .contentMargins(.bottom, DS.floatingTabBarClearance + 60, for: .scrollContent)   // clears tab bar + dial button
     }
     
+    /// Long-press › Message: opens (or creates) the conversation with that caller.
+    private func openChat(with contact: Contact) {
+        Task {
+            do {
+                let chat = try await DatabaseManager.shared.openChat(with: contact)
+                await MainActor.run { chatToOpen = chat }
+            } catch {
+                await MainActor.run { chatError = error.localizedDescription }
+            }
+        }
+    }
+
     private var groupedCalls: [Date: [CallRecord]] {
         Dictionary(grouping: filteredCalls) { call in
             Calendar.current.startOfDay(for: call.timestamp)
@@ -94,16 +171,14 @@ struct CallsView: View {
         }
     }
     
+    /// "Today" / "Yesterday" / "November 18, 2026" in the app's language ("Hoy", "Ayer", …).
     private func formatDate(_ date: Date) -> String {
-        if Calendar.current.isDateInToday(date) {
-            return "Today"
-        } else if Calendar.current.isDateInYesterday(date) {
-            return "Yesterday"
-        } else {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "MMMM d, yyyy"
-            return formatter.string(from: date)
-        }
+        let formatter = DateFormatter()
+        formatter.locale = AppLanguage.locale
+        formatter.dateStyle = .long
+        formatter.timeStyle = .none
+        formatter.doesRelativeDateFormatting = true
+        return formatter.string(from: date)
     }
 }
 
@@ -112,9 +187,8 @@ struct CallRow: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            ProfileImageView(imageURL: call.contact.imageURL,
-                           placeholderText: call.contact.initials)
-                .frame(width: 40, height: 40)
+            UserAvatar(userId: call.contact.userId ?? call.contact.id, name: call.contact.name,
+                       fallbackURL: call.contact.imageURL, size: 44)
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(call.contact.name)
@@ -187,18 +261,11 @@ struct CallRow: View {
 
 struct EmptyCallsView: View {
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "phone.circle")
-                .font(.system(size: 80))
-                .foregroundColor(.gray)
-            
-            Text("No Call History")
-                .font(.title2)
-                .fontWeight(.semibold)
-            
-            Text("Your call history will appear here")
-                .foregroundColor(.gray)
-        }
+        EmptyStateView(
+            icon: "phone",
+            title: "No Call History",
+            message: "Your calls will appear here."
+        )
     }
 }
 
@@ -208,7 +275,6 @@ class CallsViewModel: ObservableObject {
     @Published var error: Error?
     
     private let databaseManager = DatabaseManager.shared
-    private let webRTCService = WebRTCService()
     
     init() {
         loadCalls()
@@ -219,20 +285,26 @@ class CallsViewModel: ObservableObject {
         
         Task {
             do {
-                calls = try await databaseManager.fetchCalls()
-                isLoading = false
+                let loaded = try await databaseManager.fetchCalls()
+                await MainActor.run {
+                    self.calls = loaded
+                    self.isLoading = false
+                }
             } catch {
-                self.error = error
-                isLoading = false
+                await MainActor.run {
+                    self.error = error
+                    self.isLoading = false
+                }
             }
         }
     }
     
     func refreshCalls() async {
         do {
-            calls = try await databaseManager.fetchCalls()
+            let loaded = try await databaseManager.fetchCalls()
+            await MainActor.run { self.calls = loaded }
         } catch {
-            self.error = error
+            await MainActor.run { self.error = error }
         }
     }
     
@@ -249,13 +321,9 @@ class CallsViewModel: ObservableObject {
         }
     }
     
-    func initiateCall(to contact: Contact) {
-        Task {
-            do {
-                try await webRTCService.startCall(to: contact.phone)
-            } catch {
-                self.error = error
-            }
+    func initiateCall(to contact: Contact, isVideo: Bool = false) {
+        Task { @MainActor in
+            CallCoordinator.shared.startCall(to: contact, isVideo: isVideo)
         }
     }
 }
@@ -334,15 +402,9 @@ struct DialpadView: View {
 
 
 class DialpadViewModel: ObservableObject {
-    private let webRTCService = WebRTCService.shared
-    
     func makeCall(to phoneNumber: String) {
-        Task {
-            do {
-                try await webRTCService.startCall(to: phoneNumber)
-            } catch {
-                // Handle error
-            }
+        Task { @MainActor in
+            CallCoordinator.shared.startCall(toPhone: phoneNumber, isVideo: false)
         }
     }
 }
@@ -354,8 +416,8 @@ struct CallDetailsView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 20) {
-                ProfileImageView(imageURL: call.contact.imageURL, placeholderText: call.contact.initials)
-                    .frame(width: 100, height: 100)
+                UserAvatar(userId: call.contact.userId ?? call.contact.id, name: call.contact.name,
+                           fallbackURL: call.contact.imageURL, size: 100)
                 
                 Text(call.contact.name)
                     .font(.title)

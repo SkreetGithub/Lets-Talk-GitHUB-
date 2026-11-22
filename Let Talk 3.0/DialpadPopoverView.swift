@@ -370,7 +370,9 @@ struct EnhancedDialpadPopoverView: View {
         }
     }
     
+    @ViewBuilder
     private var contactsSearchView: some View {
+        #if DEBUG
         VStack(spacing: 8) {
             Text("Recent Contacts")
                 .font(.caption)
@@ -406,6 +408,7 @@ struct EnhancedDialpadPopoverView: View {
                 .padding(.horizontal, 4)
             }
         }
+        #endif
     }
     
     private var dialpadGrid: some View {

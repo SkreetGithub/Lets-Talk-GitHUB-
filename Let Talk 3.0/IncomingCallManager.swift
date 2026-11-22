@@ -15,7 +15,8 @@ class IncomingCallManager: ObservableObject {
     private var ringtoneTimer: Timer?
     
     private init() {
-        setupAudioSession()
+        // No audio-session activation at init: this object is created at launch, and activating
+        // .playAndRecord there stopped the user's music as soon as the app opened.
     }
     
     // MARK: - Audio Session Setup
@@ -25,7 +26,7 @@ class IncomingCallManager: ObservableObject {
             try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker])
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
-            print("Error setting up audio session: \(error)")
+            debugLog("Error setting up audio session: \(error)")
         }
     }
     
@@ -76,7 +77,7 @@ class IncomingCallManager: ObservableObject {
         // Reject call in Supabase-backed signaling
         if let call = currentIncomingCall {
             Task {
-                try? await FirebaseSignalingService.shared.rejectCall(callId: call.id)
+                try? await SupabaseSignalingService.shared.rejectCall(callId: call.id)
             }
         }
         
@@ -186,7 +187,7 @@ class IncomingCallManager: ObservableObject {
         
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
-                print("Error sending notification: \(error)")
+                debugLog("Error sending notification: \(error)")
             }
         }
     }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import Combine
 import Supabase
 
@@ -11,11 +12,7 @@ final class SettingsManager: ObservableObject {
 
     private let client = SupabaseManager.client
 
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        return d
-    }()
+    private let decoder: JSONDecoder = PostgresDate.decoder   // handles Supabase fractional-second timestamps
 
     private init() {
         loadSettings()
@@ -115,18 +112,15 @@ final class SettingsManager: ObservableObject {
         saveSettings()
     }
 
-    private func applyTheme(_ theme: AppTheme) {
+    /// Applies the theme to every window of every scene (the call screen and alerts live in
+    /// their own windows, so the old code — first scene only — missed them).
+    func applyTheme(_ theme: AppTheme) {
         DispatchQueue.main.async {
-            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-                windowScene.windows.forEach { window in
-                    switch theme {
-                    case .light:
-                        window.overrideUserInterfaceStyle = .light
-                    case .dark:
-                        window.overrideUserInterfaceStyle = .dark
-                    case .system, .ocean, .sunset, .forest, .lavender, .fire, .arctic, .cosmic:
-                        window.overrideUserInterfaceStyle = .unspecified
-                    }
+            for scene in UIApplication.shared.connectedScenes {
+                guard let windowScene = scene as? UIWindowScene else { continue }
+                for window in windowScene.windows {
+                    window.overrideUserInterfaceStyle = theme.interfaceStyle
+                    window.tintColor = theme.uiAccent
                 }
             }
         }
@@ -134,9 +128,17 @@ final class SettingsManager: ObservableObject {
 
     // MARK: - Language Management
 
+    /// "My language": what incoming messages and call subtitles are translated into. Kept in
+    /// step with the call screen's language and saved to the profile, so message
+    /// notifications sent to this user arrive in this language too.
     func setLanguage(_ language: String) {
         settings.language = language
         saveSettings()
+        AppLanguage.applyToSystem(language)
+        Task { @MainActor in
+            LiveTranslationSession.shared.adoptSavedLanguage()
+            await AuthManager.shared.syncLanguage(language)
+        }
     }
 
     func setSourceLanguage(_ language: String) {
@@ -178,7 +180,16 @@ final class SettingsManager: ObservableObject {
 
     // MARK: - Privacy Settings
 
+    /// Saves Show Online Status and updates how others see you right away.
+    func setShowOnlineStatus(_ show: Bool) {
+        settings.privacy.showOnlineStatus = show
+        saveSettings()
+        AuthManager.shared.updateOnlineStatus(isOnline: true)   // sends "offline" when hidden
+    }
+
     func updatePrivacySettings(_ privacy: AppSettings.PrivacySettings) {
+        let visibilityChanged = privacy.showOnlineStatus != settings.privacy.showOnlineStatus
+        defer { if visibilityChanged { AuthManager.shared.updateOnlineStatus(isOnline: true) } }
         settings.privacy = privacy
         saveSettings()
     }
@@ -284,8 +295,20 @@ private struct ProfileSettingsRow: Codable {
 // MARK: - App Settings Model
 
 struct AppSettings: Codable {
+    static let supportedLanguages: Set<String> = ["en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh", "ar", "hi"]
+
+    /// The iPhone's language as one of the app's language codes ("es-MX" -> "es", "zh-Hans-CN" -> "zh").
+    static var deviceLanguage: String {
+        for identifier in Locale.preferredLanguages {
+            let code = Locale(identifier: identifier).language.languageCode?.identifier ?? ""
+            if supportedLanguages.contains(code) { return code }
+        }
+        return "en"
+    }
+
     var theme: AppTheme = .system
-    var language: String = "en"
+    /// First launch: the iPhone's own language (if the app has it), else English.
+    var language: String = AppSettings.deviceLanguage
     var sourceLanguage: String = "auto"
     var targetLanguage: String = "es"
     var notifications: NotificationSettings = NotificationSettings()
@@ -425,6 +448,39 @@ enum AppTheme: String, CaseIterable, Codable {
             return true
         }
     }
+
+    /// The app-wide accent: buttons, links, switches, selected tab, sent bubbles.
+    var accent: Color { Color(uiAccent) }
+
+    var uiAccent: UIColor {
+        switch self {
+        case .light, .dark, .system: return .systemBlue
+        case .ocean: return .systemTeal
+        case .sunset: return .systemOrange
+        case .forest: return .systemGreen
+        case .lavender: return .systemPurple
+        case .fire: return .systemRed
+        case .arctic: return .systemCyan
+        case .cosmic: return .systemIndigo
+        }
+    }
+
+    /// Light / dark for the whole app (every window, sheet and the call screen).
+    var interfaceStyle: UIUserInterfaceStyle {
+        switch self {
+        case .light, .arctic: return .light
+        case .dark, .cosmic: return .dark
+        default: return .unspecified
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch interfaceStyle {
+        case .light: return .light
+        case .dark: return .dark
+        default: return nil
+        }
+    }
 }
 
 enum VideoQuality: String, CaseIterable, Codable {
@@ -448,11 +504,19 @@ enum TranslationProvider: String, CaseIterable, Codable {
     case openAI = "openAI"
     case azure = "azure"
 
+    /// Providers the `translate` server function supports (Azure isn't set up, so it isn't offered).
+    static let available: [TranslationProvider] = [.google, .openAI]
+
+    /// Value for the `translate` function's `provider` field (nil = Google, the default).
+    var backendValue: String? { self == .openAI ? "openai" : nil }
+
+    /// What users see. The vendor behind each option isn't shown in the app (the privacy policy
+    /// names the providers). Standard = Google Translate, Advanced = OpenAI.
     var displayName: String {
         switch self {
-        case .google: return "Google Translate"
-        case .openAI: return "OpenAI GPT"
-        case .azure: return "Azure Translator"
+        case .google: return "Standard"
+        case .openAI: return "Advanced"
+        case .azure: return "Enterprise"
         }
     }
 }

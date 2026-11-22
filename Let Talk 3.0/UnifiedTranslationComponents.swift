@@ -1,19 +1,13 @@
 import SwiftUI
 import PhotosUI
 
-// MARK: - Keyboard Dismissal Modifier
-struct KeyboardDismissalModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .onTapGesture {
-                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-            }
-    }
-}
-
+// MARK: - Keyboard Dismissal
+// Taps outside a text field close the keyboard app-wide (see KeyboardDismisser in
+// Let_Talk_3_0App.swift). This modifier is kept for older call sites; it no longer adds its own
+// tap gesture, which used to compete with the buttons inside the screen.
 extension View {
     func dismissKeyboardOnTap() -> some View {
-        modifier(KeyboardDismissalModifier())
+        self.scrollDismissesKeyboard(.interactively)
     }
 }
 
@@ -25,40 +19,43 @@ struct UnifiedLanguageButton: View {
     
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                Text(language.flag)
-                    .font(.system(size: 24))
+            // Vertical tile: flag, name, code. Side-by-side layout left ~38pt for the
+            // name, which broke "English" into "En/gli/sh".
+            VStack(spacing: DS.spacingXS) {
+                FlagView(flag: language.flag, height: 26)
                 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(language.name)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.white)
-                    
-                    Text(language.code.uppercased())
-                        .font(.system(size: 12, weight: .regular))
-                        .foregroundColor(.white.opacity(0.7))
-                }
+                Text(language.displayName)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 
-                Spacer()
-                
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(.blue)
-                }
+                Text(language.code.uppercased())
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundColor(.white.opacity(0.7))
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 96)   // both tiles always the same height
+            .padding(.horizontal, DS.spacingS)
             .background(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: DS.cornerRadiusS)
                     .fill(isSelected ? Color.blue.opacity(0.1) : Color.clear)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: DS.cornerRadiusS)
                             .stroke(isSelected ? Color.blue : Color.white.opacity(0.3), lineWidth: 1)
                     )
             )
+            .overlay(alignment: .topTrailing) {
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(.blue)
+                        .padding(DS.spacingS)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: DS.cornerRadiusS))
         }
-        .buttonStyle(PlainButtonStyle())
+        .buttonStyle(PressableStyle())
+        .accessibilityLabel("\(language.name). Tap to change language")
     }
 }
 
@@ -72,7 +69,7 @@ struct UnifiedTextInputCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text(placeholder)
+                Text(LocalizedStringKey(placeholder))
                     .font(.headline)
                     .foregroundColor(.white)
                     .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
@@ -105,24 +102,38 @@ struct UnifiedTextInputCard: View {
                 }
             }
             
-            ZStack {
+            ZStack(alignment: .topLeading) {
                 TextEditor(text: $text)
-                    .frame(height: 120)
-                    .padding(16)
+                    .scrollContentBackground(.hidden)   // keep the glass look; white text was invisible on the default white box
+                    .font(.body)
+                    .frame(minHeight: 120)
+                    .padding(DS.spacingM)
                     .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color.white.opacity(0.1))
+                        RoundedRectangle(cornerRadius: DS.cornerRadiusM)
+                            .fill(Color.white.opacity(0.12))
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: DS.cornerRadiusM)
+                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
                     )
                     .foregroundColor(.white)
+                    .accessibilityLabel("Text to translate")
+                
+                // Placeholder. TextEditor has none; offsets match its built-in text insets (5pt / 8pt).
+                if text.isEmpty && !isProcessing {
+                    Text("Type or paste text to translate...")
+                        .font(.body)
+                        .foregroundColor(.white.opacity(0.6))
+                        .padding(.horizontal, DS.spacingM + 5)
+                        .padding(.vertical, DS.spacingM + 8)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
                 
                 if isProcessing {
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: DS.cornerRadiusM)
                         .fill(Color.black.opacity(0.4))
-                        .frame(height: 120)
+                        .frame(maxWidth: .infinity, minHeight: 120 + DS.spacingM * 2)
                         .overlay(
                             VStack(spacing: 8) {
                                 ProgressView()
@@ -187,6 +198,8 @@ struct UnifiedControlButton: View {
             )
             .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
         }
+        .buttonStyle(PressableStyle())
+        .accessibilityLabel(title)
         .disabled(isProcessing)
     }
 }
@@ -211,21 +224,32 @@ struct UnifiedTranslateButton: View {
                 Text("Translate")
                     .fontWeight(.semibold)
             }
+            .frame(maxWidth: .infinity)
+            .frame(height: 70)                       // same height as the Speak button beside it
+            .background(
+                RoundedRectangle(cornerRadius: DS.cornerRadiusM)
+                    .fill(canTranslate ? Color.blue.opacity(0.8) : Color.gray.opacity(0.5))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.cornerRadiusM)
+                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: DS.cornerRadiusM))
+            .animation(.easeInOut(duration: 0.2), value: isTranslating)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 16)
-        .padding(.horizontal, 20)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(canTranslate ? Color.blue.opacity(0.8) : Color.gray.opacity(0.5))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.3), lineWidth: 1)
-        )
+        .buttonStyle(PressableStyle())
         .foregroundColor(.white)
         .disabled(!canTranslate || isTranslating)
         .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+    }
+}
+
+extension UnifiedTranslationLanguage {
+    /// The language's name in the app's language ("Inglés" when the app is in Spanish).
+    var displayName: String {
+        let appLocale = Locale(identifier: AppLanguage.lprojName(for: AppLanguage.current))
+        let base = code.split(separator: "-").first.map(String.init) ?? code
+        return appLocale.localizedString(forLanguageCode: base)?.localizedCapitalized ?? name
     }
 }
 
@@ -248,7 +272,7 @@ struct UnifiedLanguageSelectionCard: View {
                 Spacer()
             }
             
-            HStack(spacing: 20) {
+            HStack(spacing: DS.spacingS) {
                 // Source Language
                 UnifiedLanguageButton(
                     language: sourceLanguage,
@@ -258,23 +282,19 @@ struct UnifiedLanguageSelectionCard: View {
                 
                 // Swap Button
                 Button(action: onSwapLanguages) {
-                    VStack(spacing: 4) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                        
-                        Text("Swap")
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.8))
-                    }
-                    .frame(width: 60, height: 60)
+                    // Icon only: the word under it wrapped badly in other languages ("Intercam-biar").
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.title3.weight(.semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 48, height: 48)
                     .background(
                         Circle()
                             .fill(.ultraThinMaterial)
                             .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
                     )
                 }
-                .buttonStyle(ScaleButtonStyle())
+                .buttonStyle(PressableStyle())
+                .accessibilityLabel("Swap languages")
                 
                 // Target Language
                 UnifiedLanguageButton(
@@ -309,7 +329,7 @@ struct UnifiedTranslationControlsCard: View {
     var body: some View {
         VStack(spacing: 20) {
             // First Row - Input Methods
-            HStack(spacing: 16) {
+            HStack(spacing: DS.spacingM) {
                 UnifiedControlButton(
                     icon: isRecording ? "mic.fill" : "mic",
                     title: "Voice",
@@ -336,7 +356,7 @@ struct UnifiedTranslationControlsCard: View {
             }
             
             // Second Row - Translate and Speaker
-            HStack(spacing: 16) {
+            HStack(spacing: DS.spacingM) {
                 UnifiedTranslateButton(
                     isTranslating: isTranslating,
                     canTranslate: canTranslate,
@@ -364,9 +384,13 @@ struct UnifiedTranslationControlsCard: View {
 // MARK: - Unified Translation Result Card
 struct UnifiedTranslationResultCard: View {
     let translatedText: String
+    let isFavorite: Bool
+    /// A translation is on its way: show the shimmer placeholder.
+    var isTranslating: Bool = false
+    /// The translation is being read aloud: show the moving bars.
+    var isSpeaking: Bool = false
     let onCopy: () -> Void
     let onFavorite: () -> Void
-    let onShare: () -> Void
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -376,6 +400,17 @@ struct UnifiedTranslationResultCard: View {
                     .foregroundColor(.white)
                     .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
                 
+                if isSpeaking {
+                    HStack(spacing: 6) {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.9))
+                        MiniWaveform()
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    .accessibilityLabel("Playing translation")
+                }
+                
                 Spacer()
                 
                 if !translatedText.isEmpty {
@@ -384,26 +419,33 @@ struct UnifiedTranslationResultCard: View {
                             Image(systemName: "doc.on.doc")
                                 .foregroundColor(.white.opacity(0.8))
                                 .font(.title3)
+                                .frame(width: DS.minTapTarget, height: DS.minTapTarget)
                         }
+                        .accessibilityLabel("Copy translation")
                         
                         Button(action: onFavorite) {
-                            Image(systemName: "heart")
-                                .foregroundColor(.white.opacity(0.8))
+                            Image(systemName: isFavorite ? "heart.fill" : "heart")
+                                .foregroundColor(isFavorite ? .pink : .white.opacity(0.8))
                                 .font(.title3)
+                                .frame(width: DS.minTapTarget, height: DS.minTapTarget)
                         }
+                        .accessibilityLabel(isFavorite ? "Remove from favorites" : "Save to favorites")
                         
-                        Button(action: onShare) {
+                        ShareLink(item: translatedText) {
                             Image(systemName: "square.and.arrow.up")
                                 .foregroundColor(.white.opacity(0.8))
                                 .font(.title3)
+                                .frame(width: DS.minTapTarget, height: DS.minTapTarget)
                         }
+                        .accessibilityLabel("Share translation")
                     }
                 }
             }
             
             ScrollView {
-                Text(translatedText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(translatedText.isEmpty ? "Your translation appears here." : translatedText)
+                    // Tall enough for the three shimmer lines while a translation is on its way.
+                    .frame(maxWidth: .infinity, minHeight: isTranslating ? 74 : nil, alignment: .topLeading)
                     .padding(16)
                     .background(
                         RoundedRectangle(cornerRadius: 16)
@@ -413,10 +455,20 @@ struct UnifiedTranslationResultCard: View {
                         RoundedRectangle(cornerRadius: 16)
                             .stroke(Color.white.opacity(0.2), lineWidth: 1)
                     )
-                    .foregroundColor(.white)
+                    .foregroundColor(isTranslating ? .clear : (translatedText.isEmpty ? .white.opacity(0.6) : .white))
+                    .textSelection(.enabled)
+                    .overlay(alignment: .topLeading) {
+                        if isTranslating {
+                            ShimmerLines()
+                                .padding(16)
+                                .transition(.opacity)
+                        }
+                    }
             }
             .frame(minHeight: 120, maxHeight: 200)
         }
+        .animation(.easeInOut(duration: 0.25), value: isTranslating)
+        .animation(.easeInOut(duration: 0.25), value: isSpeaking)
         .padding(20)
         .background(
             RoundedRectangle(cornerRadius: 20)
@@ -438,101 +490,86 @@ struct UnifiedHeader: View {
     let onSettingsTap: () -> Void
     
     var body: some View {
-        VStack(spacing: 16) {
-            HStack {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "globe.americas.fill")
-                            .font(.title)
-                            .foregroundColor(.white)
-                            .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(title)
-                                .font(.largeTitle)
-                                .fontWeight(.bold)
-                                .foregroundColor(.white)
-                                .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
-                            
-                            Text(subtitle)
-                                .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.9))
-                                .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
-                        }
-                    }
+        VStack(alignment: .leading, spacing: DS.spacingM) {
+            // Row 1: icon + title. Full width, so "AI Translator" stays on one line.
+            HStack(alignment: .center, spacing: DS.spacingM) {
+                Image(systemName: "globe.americas.fill")
+                    .font(.title)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundColor(.white)
+                    .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+                    .accessibilityHidden(true)
+                
+                VStack(alignment: .leading, spacing: DS.spacingXS) {
+                    Text(LocalizedStringKey(title))
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
                     
-                    // Status indicator
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(isTranslating ? Color.green : Color.orange)
-                            .frame(width: 8, height: 8)
-                            .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
-                        
-                        Text(isTranslating ? "Translating..." : "Ready to translate")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.8))
-                        
-                        Spacer()
-                        
-                        // Language pair indicator
-                        Text("\(sourceLanguage.code.uppercased()) → \(targetLanguage.code.uppercased())")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.8))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(.ultraThinMaterial)
-                                    .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
-                            )
-                    }
+                    Text(LocalizedStringKey(subtitle))
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.9))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
                 }
                 
-                Spacer()
+                Spacer(minLength: 0)
+            }
+            
+            // Row 2: status + language pair on the left, actions on the right.
+            HStack(spacing: DS.spacingS) {
+                Circle()
+                    .fill(isTranslating ? Color.green : Color.orange)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
                 
-                HStack(spacing: 12) {
-                    // History button
-                    Button(action: onHistoryTap) {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                            .frame(width: 44, height: 44)
-                            .background(
-                                Circle()
-                                    .fill(.ultraThinMaterial)
-                                    .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
-                            )
-                    }
-                    
-                    // Favorites button
-                    Button(action: onFavoritesTap) {
-                        Image(systemName: "heart.fill")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                            .frame(width: 44, height: 44)
-                            .background(
-                                Circle()
-                                    .fill(.ultraThinMaterial)
-                                    .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
-                            )
-                    }
-                    
-                    // Settings button
-                    Button(action: onSettingsTap) {
-                        Image(systemName: "gearshape.fill")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                            .frame(width: 44, height: 44)
-                            .background(
-                                Circle()
-                                    .fill(.ultraThinMaterial)
-                                    .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
-                            )
-                    }
-                }
+                Text(isTranslating ? "Translating..." : "Ready to translate")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.8))
+                    .lineLimit(1)
+                    .fixedSize()
+                
+                Text("\(sourceLanguage.code.uppercased()) → \(targetLanguage.code.uppercased())")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.8))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, DS.spacingS)
+                    .padding(.vertical, DS.spacingXS)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(.ultraThinMaterial)
+                            .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+                    )
+                
+                Spacer(minLength: DS.spacingS)
+                
+                headerButton("clock.arrow.circlepath", label: "Translation history", action: onHistoryTap)
+                headerButton("heart.fill", label: "Favorites", action: onFavoritesTap)
+                headerButton("gearshape.fill", label: "Translator settings", action: onSettingsTap)
             }
         }
-        .padding(.top, 10)
+        .padding(.top, DS.spacingL)   // breathing room below the nav bar; title no longer touches the gradient edge
+    }
+    
+    private func headerButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundColor(.white)
+                .frame(width: DS.minTapTarget, height: DS.minTapTarget)
+                .background(
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                )
+        }
+        .buttonStyle(PressableStyle())
+        .accessibilityLabel(label)
     }
 }
 
@@ -553,21 +590,21 @@ struct UnifiedBackground: View {
             )
             .ignoresSafeArea()
             
-            // Animated particles
-            ForEach(0..<20, id: \.self) { index in
-                Circle()
-                    .fill(Color.white.opacity(0.1))
-                    .frame(width: CGFloat.random(in: 4...12))
-                    .position(
-                        x: CGFloat.random(in: 0...UIScreen.main.bounds.width),
-                        y: CGFloat.random(in: 0...UIScreen.main.bounds.height)
-                    )
-                    .animation(
-                        Animation.linear(duration: Double.random(in: 10...20))
-                            .repeatForever(autoreverses: false),
-                        value: UUID()
-                    )
+            // Static particles. Positions are derived from the index, so they no longer jump
+            // to new random spots every time the screen re-renders (e.g. on each keystroke).
+            GeometryReader { geo in
+                ForEach(0..<20, id: \.self) { index in
+                    let fx = CGFloat((index * 37 + 11) % 100) / 100
+                    let fy = CGFloat((index * 61 + 23) % 100) / 100
+                    Circle()
+                        .fill(Color.white.opacity(0.1))
+                        .frame(width: CGFloat(4 + (index * 7) % 9))
+                        .position(x: fx * geo.size.width, y: fy * geo.size.height)
+                }
             }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
     }
 }

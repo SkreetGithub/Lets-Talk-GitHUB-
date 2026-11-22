@@ -16,21 +16,13 @@ struct Let_Talk_3_0App: App {
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var dataPersistence = DataPersistenceManager.shared
     @StateObject private var settingsManager = SettingsManager.shared
+    @StateObject private var aiConsent = AIConsent.shared
     @State private var isSplashActive = true
     @State private var splashTimer: Timer?
     
-    // Computed property for preferred color scheme based on settings
+    // Light / dark from Settings › Appearance (nil = follow the iPhone).
     private var preferredColorScheme: ColorScheme? {
-        switch settingsManager.settings.theme {
-        case .light:
-            return .light
-        case .dark:
-            return .dark
-        case .system:
-            return nil // Use system default
-        case .ocean, .sunset, .forest, .lavender, .fire, .arctic, .cosmic:
-            return nil // Use system default for gradient themes
-        }
+        settingsManager.settings.theme.colorScheme
     }
     
     var body: some Scene {
@@ -44,7 +36,7 @@ struct Let_Talk_3_0App: App {
                         endPoint: .bottomTrailing
                     )
                     .ignoresSafeArea()
-                    .opacity(0.1) // Subtle background
+                    .opacity(0.18) // Subtle background
                 }
                 
                 if isSplashActive {
@@ -64,6 +56,8 @@ struct Let_Talk_3_0App: App {
                         
                         if !hasCompletedOnboarding {
                             OnboardingView()
+                                .environmentObject(authManager)
+                                .environmentObject(settingsManager)
                         } else {
                             EnhancedAuthView()
                                 .environmentObject(authManager)
@@ -79,13 +73,34 @@ struct Let_Talk_3_0App: App {
                 DynamicIslandViews()
             }
             .preferredColorScheme(preferredColorScheme)
+            .tint(settingsManager.settings.theme.accent)
+            // The whole app in the language picked in Settings (instantly, no restart).
+            .appLanguage(settingsManager.settings.language)
+            .onChange(of: settingsManager.settings.theme) { _, theme in settingsManager.applyTheme(theme) }
+            // Every scroll view in the app (lists, chats, settings) closes the keyboard when dragged.
+            .scrollDismissesKeyboard(.interactively)
+            .sheet(isPresented: $aiConsent.needsPrompt) {
+                AIConsentView()
+            }
             .onAppear {
                 startSplashTimer()
+                CallKitManager.shared.registerVoIP()
+                KeyboardDismisser.install()   // tap outside a text field closes the keyboard, app-wide
+            }
+            // OAuth return (lettalk://auth-callback). The in-app Google sheet normally catches it
+            // itself; this covers the case where the system hands the link to the app instead.
+            .onOpenURL { url in
+                SupabaseManager.client.auth.handle(url)
             }
             .onChange(of: authManager.isAuthenticated) { oldValue, newValue in
                 // Force UI update when authentication state changes
                 // This ensures the navigation happens immediately
-                print("Authentication state changed: \(newValue)")
+                if newValue {
+                    CallKitManager.shared.uploadPendingToken()
+                    NotificationManager.shared.uploadPendingToken()
+                    Task { await AuthManager.shared.syncLanguage(SettingsManager.shared.settings.language) }
+                    Task { await ModerationManager.shared.refresh() }
+                }
 
                 // Ensure splash screen is dismissed when auth state changes
                 if isSplashActive {
@@ -124,15 +139,10 @@ struct Let_Talk_3_0App: App {
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        // Configure Google Sign-In (uncomment when SDK is added)
-        /*
-        if let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
-           let plist = NSDictionary(contentsOfFile: path),
-           let clientId = plist["CLIENT_ID"] as? String {
-            GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientId)
-        }
-        */
-        
+        // VoIP pushes must be registered at launch, not when a screen appears: when the app is
+        // closed, iOS wakes it in the background for an incoming call and no screen ever appears,
+        // so the call was never delivered (and iOS stops sending VoIP pushes to apps that miss them).
+        CallKitManager.shared.registerVoIP()
         // Configure Push Notifications
         let notificationCenter = UNUserNotificationCenter.current()
         notificationCenter.delegate = NotificationManager.shared
@@ -162,6 +172,6 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     
     func application(_ application: UIApplication,
                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        print("Failed to register for remote notifications: \(error)")
+        debugLog("Failed to register for remote notifications: \(error)")
     }
 }

@@ -1,6 +1,8 @@
 import SwiftUI
 import WebRTC
 
+/// The dial pad (Calls tab › green phone button). Styled like the iPhone's own keypad:
+/// big glass keys on a dark, slowly moving brand-color background.
 struct EnhancedDialpadView: View {
     @Binding var isPresented: Bool
     @State private var phoneNumber = ""
@@ -9,79 +11,66 @@ struct EnhancedDialpadView: View {
     @State private var showInvalidNumberAlert = false
     @State private var searchText = ""
     @State private var showContacts = false
-    @State private var webRTCService: WebRTCService?
-    
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let keys: [[(String, String)]] = [
+        [("1", ""), ("2", "ABC"), ("3", "DEF")],
+        [("4", "GHI"), ("5", "JKL"), ("6", "MNO")],
+        [("7", "PQRS"), ("8", "TUV"), ("9", "WXYZ")],
+        [("*", ""), ("0", "+"), ("#", "")]
+    ]
+
     var body: some View {
         ZStack {
-            // Blurred Background
-            Color.black.opacity(0.3)
+            // The call screen's moving glows, turned well down so the numbers stay the focus.
+            // Only the background runs under the Dynamic Island and home indicator.
+            CallAuraBackground(base: Brand.ink, isLive: false, intensity: 0.45)
                 .ignoresSafeArea()
-                .onTapGesture {
-                    dismissDialpad()
-                }
             
-            // Dialpad Content
-            VStack(spacing: 0) {
-                Spacer()
+            // Everything else stays inside the safe area, and every size is worked out from
+            // the space that is actually there, so nothing is cut off on any iPhone.
+            GeometryReader { geometry in
+                let metrics = DialpadMetrics(size: geometry.size)
                 
-                VStack(spacing: 20) {
-                    // Header with close button
+                VStack(spacing: 0) {
+                    // Close (top left)
                     HStack {
-                        Text("Dial")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.primary)
-                        
+                        closeButton
                         Spacer()
-                        
-                        Button(action: dismissDialpad) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.title2)
-                                .foregroundColor(.secondary)
-                        }
                     }
+                    .padding(.leading, DS.spacingM)
+                    .padding(.top, metrics.topPadding)
                     
-                    // Phone Number Display
                     phoneNumberDisplay
+                        .padding(.top, metrics.gap)
                     
-                    // Contacts Search (if number is being entered)
-                    if !phoneNumber.isEmpty {
+                    // Your saved contacts appear once you start typing (tap one to fill in the number).
+                    if metrics.showsContacts {
                         contactsSearchView
+                            .frame(height: DialpadMetrics.contactsHeight)
+                            .opacity(phoneNumber.isEmpty ? 0 : 1)
+                            .animation(.easeInOut(duration: 0.2), value: phoneNumber.isEmpty)
                     }
                     
-                    // Dialpad Grid
-                    dialpadGrid
+                    Spacer(minLength: metrics.gap)
                     
-                    // Call Buttons
-                    callButtons
+                    dialpadGrid(metrics)
+                        .modifier(ShakeEffect(shakes: isShaking ? 2 : 0))
+                    
+                    callButton(size: metrics.key)
+                        .padding(.top, metrics.callGap)
+                        .padding(.bottom, metrics.bottomPadding)
                 }
-                .padding(30)
-                .background(
-                    RoundedRectangle(cornerRadius: 20)
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 20)
-                                .stroke(.white.opacity(0.2), lineWidth: 1)
-                        )
-                )
-                .padding(.horizontal, 20)
-                .scaleEffect(isShaking ? 0.95 : 1.0)
-                .animation(.easeInOut(duration: 0.1).repeatCount(3, autoreverses: true), value: isShaking)
-                
-                Spacer()
+                .frame(width: geometry.size.width, height: geometry.size.height)
             }
         }
-        .onAppear {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
-                // Animate in
-            }
-        }
-        .actionSheet(isPresented: $showCallOptions) {
-            ActionSheet(title: Text("Call Options"), buttons: [
-                .default(Text("Audio Call")) { makeCall(isVideo: false) },
-                .default(Text("Video Call")) { makeCall(isVideo: true) },
-                .cancel()
-            ])
+        .environment(\.colorScheme, .dark)
+        .presentationDragIndicator(.visible)
+        // Modern replacement for ActionSheet (deprecated), whose buttons were dropping taps.
+        .confirmationDialog("Call Options", isPresented: $showCallOptions, titleVisibility: .visible) {
+            Button("Audio Call") { makeCall(isVideo: false) }
+            Button("Video Call") { makeCall(isVideo: true) }
+            Button("Cancel", role: .cancel) { }
         }
         .alert("Invalid Number", isPresented: $showInvalidNumberAlert) {
             Button("OK", role: .cancel) { }
@@ -89,130 +78,135 @@ struct EnhancedDialpadView: View {
             Text("Please enter a valid 10-digit phone number")
         }
     }
-    
-    private var phoneNumberDisplay: some View {
-        VStack(spacing: 8) {
-            Text(phoneNumber.isEmpty ? "Enter number" : formatPhoneNumber(phoneNumber))
-                .font(.title2)
-                .fontWeight(.semibold)
-                .foregroundColor(.primary)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(.systemGray6))
-                )
-            
-            if !phoneNumber.isEmpty {
-                Button("Clear") {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        phoneNumber = ""
-                    }
-                }
-                .font(.caption)
-                .foregroundColor(.blue)
-            }
+
+    private var closeButton: some View {
+        Button(action: dismissDialpad) {
+            Image(systemName: "xmark")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(.white.opacity(0.85))
+                .frame(width: 34, height: 34)
+                .background(.ultraThinMaterial, in: Circle())
+                .frame(width: DS.minTapTarget, height: DS.minTapTarget)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(PressableStyle())
+        .accessibilityLabel("Close dial pad")
     }
     
+    // MARK: - Number display
+
+    private var phoneNumberDisplay: some View {
+        HStack(spacing: DS.spacingS) {
+            // Invisible twin of the delete button keeps the number exactly centered.
+            Color.clear.frame(width: DS.minTapTarget, height: DS.minTapTarget)
+
+            Text(phoneNumber.isEmpty ? " " : formatPhoneNumber(phoneNumber))
+                .font(.system(size: 40, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundColor(.white)
+                .shadow(color: .white.opacity(0.35), radius: 10)          // soft glow
+                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .contentTransition(reduceMotion ? .identity : .numericText())  // digits roll in and out
+                .frame(maxWidth: .infinity)
+                .overlay {
+                    if phoneNumber.isEmpty {
+                        Text("Enter a number")
+                            .font(.system(size: 20, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.4))
+                            .transition(.opacity)
+                    }
+                }
+                .accessibilityLabel(phoneNumber.isEmpty ? "No number entered" : "Number, \(phoneNumber)")
+
+            Button(action: deleteLastDigit) {
+                Image(systemName: "delete.left")
+                    .font(.system(size: 22, weight: .regular))
+                    .foregroundColor(.white.opacity(0.7))
+                    .frame(width: DS.minTapTarget, height: DS.minTapTarget)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PressableStyle())
+            .simultaneousGesture(LongPressGesture(minimumDuration: 0.6).onEnded { _ in clearNumber() })
+            .opacity(phoneNumber.isEmpty ? 0 : 1)
+            .disabled(phoneNumber.isEmpty)
+            .accessibilityLabel("Delete")
+            .accessibilityHint("Touch and hold to clear the number")
+        }
+        .frame(height: 64)
+        .padding(.horizontal, DS.spacingM)
+        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: phoneNumber)
+    }
+
+    /// Your saved contacts, one tap to fill in their number. (Debug builds used to show fake
+    /// "Contact 1…5 / 555-000x" entries here; release builds showed nothing.)
+    @ViewBuilder
     private var contactsSearchView: some View {
-        VStack(spacing: 8) {
-            Text("Recent Contacts")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            
-            // Mock recent contacts - in real app, this would be actual contacts
+        let contacts = Array(ContactManager.shared.contacts.filter { $0.phone.filter(\.isNumber).count >= 7 }.prefix(10))
+        if !contacts.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(0..<5) { index in
-                        ContactQuickButton(
-                            name: "Contact \(index + 1)",
-                            phone: "555-000\(index + 1)"
-                        ) { contactPhone in
-                            phoneNumber = contactPhone
+                    ForEach(contacts) { contact in
+                        ContactQuickButton(name: contact.name, phone: contact.phone) { contactPhone in
+                            phoneNumber = contactPhone.filter { $0.isNumber || $0 == "+" }
                         }
                     }
                 }
-                .padding(.horizontal, 4)
+                .padding(.horizontal, DS.spacingL)
+            }
+        } else {
+            Color.clear
+        }
+    }
+
+    // MARK: - Keys
+
+    private func dialpadGrid(_ metrics: DialpadMetrics) -> some View {
+        VStack(spacing: metrics.rowSpacing) {
+            ForEach(0..<keys.count, id: \.self) { row in
+                HStack(spacing: metrics.columnSpacing) {
+                    ForEach(keys[row], id: \.0) { key in
+                        EnhancedDialpadButton(number: key.0, letters: key.1, size: metrics.key) { addDigit(key.0) }
+                    }
+                }
             }
         }
     }
     
-    private var dialpadGrid: some View {
-        VStack(spacing: 16) {
-            // Row 1: 1, 2, 3
-            HStack(spacing: 20) {
-                EnhancedDialpadButton(number: "1", letters: "", action: { addDigit("1") })
-                EnhancedDialpadButton(number: "2", letters: "ABC", action: { addDigit("2") })
-                EnhancedDialpadButton(number: "3", letters: "DEF", action: { addDigit("3") })
-            }
-            
-            // Row 2: 4, 5, 6
-            HStack(spacing: 20) {
-                EnhancedDialpadButton(number: "4", letters: "GHI", action: { addDigit("4") })
-                EnhancedDialpadButton(number: "5", letters: "JKL", action: { addDigit("5") })
-                EnhancedDialpadButton(number: "6", letters: "MNO", action: { addDigit("6") })
-            }
-            
-            // Row 3: 7, 8, 9
-            HStack(spacing: 20) {
-                EnhancedDialpadButton(number: "7", letters: "PQRS", action: { addDigit("7") })
-                EnhancedDialpadButton(number: "8", letters: "TUV", action: { addDigit("8") })
-                EnhancedDialpadButton(number: "9", letters: "WXYZ", action: { addDigit("9") })
-            }
-            
-            // Row 4: *, 0, #
-            HStack(spacing: 20) {
-                EnhancedDialpadButton(number: "*", letters: "", action: { addDigit("*") })
-                EnhancedDialpadButton(number: "0", letters: "+", action: { addDigit("0") })
-                EnhancedDialpadButton(number: "#", letters: "", action: { addDigit("#") })
-            }
+    // MARK: - Call button
+
+    private func callButton(size: CGFloat) -> some View {
+        Button(action: initiateCall) {
+            Image(systemName: "phone.fill")
+                .font(.system(size: size * 0.4, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: size, height: size)
+                .background(
+                    Circle().fill(isValidPhoneNumber ? Color(red: 0.2, green: 0.8, blue: 0.35) : Color.white.opacity(0.18))
+                )
+                .background(
+                    // Glowing pulse once the number is complete.
+                    CallPulse(active: isValidPhoneNumber && !reduceMotion)
+                )
+                .shadow(color: isValidPhoneNumber ? Color.green.opacity(0.5) : .clear, radius: 14)
         }
+        .buttonStyle(PressableStyle())
+        .disabled(!isValidPhoneNumber)
+        .animation(.easeInOut(duration: 0.25), value: isValidPhoneNumber)
+        .accessibilityLabel("Call")
+        .accessibilityHint(isValidPhoneNumber ? "Choose an audio or video call" : "Enter a phone number first")
     }
-    
-    private var callButtons: some View {
-        HStack(spacing: 20) {
-            // Delete Button
-            Button(action: deleteLastDigit) {
-                Image(systemName: "delete.left.fill")
-                    .font(.title2)
-                    .foregroundColor(.primary)
-                    .frame(width: 60, height: 60)
-                    .background(
-                        Circle()
-                            .fill(Color(.systemGray5))
-                    )
-            }
-            .disabled(phoneNumber.isEmpty)
-            .opacity(phoneNumber.isEmpty ? 0.3 : 1.0)
-            
-            // Call Button
-            Button(action: initiateCall) {
-                Image(systemName: "phone.fill")
-                    .font(.title2)
-                    .foregroundColor(.white)
-                    .frame(width: 60, height: 60)
-                    .background(
-                        Circle()
-                            .fill(isValidPhoneNumber ? Color.green : Color.gray)
-                    )
-            }
-            .disabled(!isValidPhoneNumber)
-            .scaleEffect(isValidPhoneNumber ? 1.0 : 0.9)
-            .animation(.easeInOut(duration: 0.2), value: isValidPhoneNumber)
-        }
-    }
-    
+
     private var isValidPhoneNumber: Bool {
         let cleanedNumber = phoneNumber.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
         // Accept phone numbers with 7-15 digits (international standard)
         return cleanedNumber.count >= 7 && cleanedNumber.count <= 15
     }
-    
+
     private func formatPhoneNumber(_ number: String) -> String {
         let cleaned = number.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
-        
+
         // Handle different phone number lengths
         if cleaned.count == 10 {
             // US format: (123) 456-7890
@@ -236,86 +230,52 @@ struct EnhancedDialpadView: View {
             }.joined()
             return "+\(countryCode) \(formatted)"
         }
-        
+
         return number
     }
-    
+
     private func addDigit(_ digit: String) {
-        withAnimation(.easeInOut(duration: 0.1)) {
-            phoneNumber += digit
-        }
-        
-        // Haptic feedback
-        let impactFeedback = UIImpactFeedbackGenerator(style: .light)
-        impactFeedback.impactOccurred()
+        guard phoneNumber.count < 20 else { return }
+        phoneNumber += digit
+        Haptics.tap()
     }
-    
+
     private func deleteLastDigit() {
-        if !phoneNumber.isEmpty {
-            withAnimation(.easeInOut(duration: 0.1)) {
-                phoneNumber.removeLast()
-            }
-            
-            // Haptic feedback
-            let impactFeedback = UIImpactFeedbackGenerator(style: .light)
-            impactFeedback.impactOccurred()
-        }
+        guard !phoneNumber.isEmpty else { return }
+        phoneNumber.removeLast()
+        Haptics.tap()
     }
-    
+
+    private func clearNumber() {
+        guard !phoneNumber.isEmpty else { return }
+        phoneNumber = ""
+        Haptics.warning()
+    }
+
     private func initiateCall() {
         if isValidPhoneNumber {
+            Haptics.tap()
             showCallOptions = true
         } else {
-            // Shake animation for invalid number
-            withAnimation(.easeInOut(duration: 0.1).repeatCount(3, autoreverses: true)) {
-                isShaking = true
-            }
-            
-            // Show alert
+            Haptics.failure()
+            withAnimation(.linear(duration: 0.35)) { isShaking = true }
             showInvalidNumberAlert = true
-            
-            // Reset shake animation
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                isShaking = false
-            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { isShaking = false }
         }
     }
-    
+
     private func makeCall(isVideo: Bool) {
-        // Implement call functionality
-        let phoneNumber = phoneNumber.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
-        
-        // Start the call using WebRTCService
-        Task {
-            do {
-                let webRTCService = WebRTCService()
-                self.webRTCService = webRTCService
-                try await webRTCService.startCall(to: phoneNumber, isVideo: isVideo)
-                
-                // Navigate to call view
-                await MainActor.run {
-                    dismissDialpad()
-                    // Post notification to navigate to call view
-                    NotificationCenter.default.post(
-                        name: NSNotification.Name("StartCall"),
-                        object: nil,
-                        userInfo: [
-                            "phoneNumber": phoneNumber,
-                            "isVideo": isVideo,
-                            "webRTCService": webRTCService
-                        ]
-                    )
-                }
-            } catch {
-                await MainActor.run {
-                    print("Failed to start call: \(error)")
-                    // Show error alert
-                    showInvalidNumberAlert = true
-                }
-            }
+        let digits = phoneNumber.replacingOccurrences(of: "[^0-9+]", with: "", options: .regularExpression)
+        guard digits.filter(\.isNumber).count >= 7 else {
+            showInvalidNumberAlert = true
+            return
         }
+        // Close the dial pad, then look up who owns the number and call it. (This used to create
+        // a throwaway WebRTCService and call the phone number as if it were a user ID.)
+        dismissDialpad()
+        CallCoordinator.shared.startCall(toPhone: digits, isVideo: isVideo)
     }
-    
+
     private func dismissDialpad() {
         withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
             isPresented = false
@@ -323,40 +283,137 @@ struct EnhancedDialpadView: View {
     }
 }
 
-// MARK: - Enhanced Dialpad Button
+// MARK: - Layout
+
+/// Works out the key size and spacing from the space inside the safe area, so the keypad fits
+/// from the iPhone SE to the Pro Max. Keys are never wider than a quarter of the screen,
+/// never more than 80 pt, and small enough that all four rows, the number and the call
+/// button fit in the height that is there.
+struct DialpadMetrics {
+    static let contactsHeight: CGFloat = 70
+    static let numberHeight: CGFloat = 64
+    static let headerHeight: CGFloat = DS.minTapTarget
+    
+    let key: CGFloat
+    let columnSpacing: CGFloat
+    let rowSpacing: CGFloat
+    let topPadding: CGFloat
+    let bottomPadding: CGFloat
+    let gap: CGFloat
+    let callGap: CGFloat
+    let showsContacts: Bool
+    
+    init(size: CGSize) {
+        let compact = size.height < 640                          // iPhone SE and similar
+        topPadding = compact ? 4 : 12
+        bottomPadding = compact ? 12 : 24
+        gap = compact ? 4 : 12
+        // Hide the contacts row only if it would squeeze the keys below a comfortable size.
+        let fixedWithContacts = topPadding + Self.headerHeight + gap + Self.numberHeight
+            + Self.contactsHeight + gap + bottomPadding
+        let fixed = fixedWithContacts - Self.contactsHeight
+        // Height the keypad needs for a key of size k: 4 rows + 3 row gaps (0.25k)
+        // + call button (k) + gap above it (0.3k) = 6.05k.
+        let heightUnits: CGFloat = 4 + 3 * 0.25 + 1 + 0.3
+        let byWidth = size.width / 4
+        let withContacts = (size.height - fixedWithContacts) / heightUnits
+        showsContacts = withContacts >= 64
+        let byHeight = (size.height - (showsContacts ? fixedWithContacts : fixed)) / heightUnits
+        key = max(52, min(byWidth, byHeight, 80))
+        columnSpacing = key * 0.4
+        rowSpacing = key * 0.25
+        callGap = key * 0.3
+    }
+}
+
+// MARK: - Keypad button
+
+/// One round frosted-glass key: big white number, small grey letters. Springs down on press
+/// and gives a light haptic tap.
 struct EnhancedDialpadButton: View {
     let number: String
     let letters: String
+    /// Diameter of the key; the text scales with it (32 pt number and 10 pt letters at 80 pt).
+    var size: CGFloat = 80
     let action: () -> Void
-    @State private var isPressed = false
-    
+
+    private var scale: CGFloat { size / 80 }
+
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 4) {
+            VStack(spacing: 0) {
                 Text(number)
-                    .font(.title)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.primary)
-                
-                if !letters.isEmpty {
-                    Text(letters)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
+                    .font(.system(size: (number == "*" ? 40 : 32) * scale, weight: .regular, design: .rounded))
+                    .foregroundColor(.white)
+                    .offset(y: number == "*" ? 6 * scale : 0)          // the asterisk glyph sits high
+                    .frame(height: 38 * scale)
+
+                Text(letters.isEmpty ? " " : letters)
+                    .font(.system(size: max(9, 10 * scale), weight: .semibold))
+                    .tracking(1.5)
+                    .foregroundColor(.white.opacity(0.55))
             }
-            .frame(width: 60, height: 60)
-            .background(
-                Circle()
-                    .fill(isPressed ? Color(.systemGray4) : Color(.systemGray6))
-                    .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+            .frame(width: size, height: size)
+            .background(.ultraThinMaterial, in: Circle())
+            .overlay(
+                Circle().stroke(
+                    LinearGradient(colors: [Color.white.opacity(0.35), Color.white.opacity(0.05)],
+                                   startPoint: .top, endPoint: .bottom),
+                    lineWidth: 1)
             )
-            .scaleEffect(isPressed ? 0.95 : 1.0)
-            .animation(.easeInOut(duration: 0.1), value: isPressed)
+            .contentShape(Circle())
         }
-        .buttonStyle(PlainButtonStyle())
-        .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, pressing: { pressing in
-            isPressed = pressing
-        }, perform: {})
+        .buttonStyle(DialKeyStyle())
+        .accessibilityLabel(letters.isEmpty || letters == "+" ? number : "\(number), \(letters)")
+    }
+}
+
+/// Press: shrink to 0.96 with a spring and light up the glass, like the iPhone keypad.
+private struct DialKeyStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .brightness(configuration.isPressed ? 0.18 : 0)
+            .animation(.spring(response: 0.22, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
+/// Two soft green rings that keep spreading out from the call button.
+private struct CallPulse: View {
+    let active: Bool
+    @State private var animate = false
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<2, id: \.self) { ring in
+                Circle()
+                    .stroke(Color.green.opacity(0.55), lineWidth: 3)
+                    .scaleEffect(animate ? 1.45 : 1)
+                    .opacity(animate ? 0 : 0.8)
+                    .animation(
+                        active
+                            ? .easeOut(duration: 1.6).repeatForever(autoreverses: false).delay(Double(ring) * 0.8)
+                            : .default,
+                        value: animate)
+            }
+        }
+        .opacity(active ? 1 : 0)
+        .onAppear { animate = active }
+        .onChange(of: active) { _, isActive in animate = isActive }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Side-to-side shake for an invalid number.
+private struct ShakeEffect: GeometryEffect {
+    var shakes: CGFloat
+    var animatableData: CGFloat {
+        get { shakes }
+        set { shakes = newValue }
+    }
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(CGAffineTransform(translationX: 8 * sin(shakes * .pi * 2), y: 0))
     }
 }
 
@@ -365,26 +422,27 @@ struct ContactQuickButton: View {
     let name: String
     let phone: String
     let onTap: (String) -> Void
-    
+
     var body: some View {
         Button(action: { onTap(phone) }) {
             VStack(spacing: 4) {
                 Circle()
-                    .fill(Color.blue.opacity(0.2))
-                    .frame(width: 40, height: 40)
+                    .fill(.ultraThinMaterial)
+                    .frame(width: 44, height: 44)
                     .overlay(
                         Text(String(name.prefix(1)))
                             .font(.headline)
-                            .foregroundColor(.blue)
+                            .foregroundColor(.white)
                     )
-                
+
                 Text(name)
                     .font(.caption2)
-                    .foregroundColor(.primary)
+                    .foregroundColor(.white.opacity(0.85))
                     .lineLimit(1)
             }
             .frame(width: 60)
         }
+        .buttonStyle(PressableStyle())
     }
 }
 

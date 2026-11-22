@@ -32,26 +32,48 @@ struct ComprehensiveChatsView: View {
             .searchable(text: $searchText, prompt: "Search conversations")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: { showNewChat = true }) {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .accessibilityLabel("New chat")
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { showSettings = true }) {
                         Image(systemName: "gearshape.fill")
                     }
+                    .accessibilityLabel("Settings")
                 }
             }
         }
-        .sheet(isPresented: $showNewChat) {
-            NewChatView()
-        }
+        // New Chat sheet is presented once, by MainTabView (it owns showNewChat).
+        // Same Settings screen as More › Settings (there used to be two different ones).
         .sheet(isPresented: $showSettings) {
-            ComprehensiveSettingsView()
+            UnifiedSettingsView(translationViewModel: UnifiedTranslationViewModel())
+                .environmentObject(settingsManager)
+                .environmentObject(authManager)
         }
-        .sheet(item: $selectedChat) { chat in
+        // Full screen, like a chat opened from Contacts (the chat screen has its own back button).
+        .fullScreenCover(item: $selectedChat) { chat in
             ChatDetailView(chat: chat)
         }
-        .refreshable {
+        .alert("Chats", isPresented: Binding(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(viewModel.errorMessage ?? "")
+        }
+        .logoRefreshable(topInset: 150) {
             await viewModel.refreshChats()
         }
         .onAppear {
             viewModel.loadChats()
+            openPendingChat(NotificationManager.shared.pendingChatId)
+        }
+        // Tapped a message notification (or the in-app banner): open that conversation.
+        .onReceive(NotificationManager.shared.$pendingChatId) { chatId in
+            openPendingChat(chatId)
         }
         .onChange(of: authManager.isAuthenticated) { oldValue, newValue in
             if newValue {
@@ -62,40 +84,58 @@ struct ComprehensiveChatsView: View {
         }
     }
     
+    private func openPendingChat(_ chatId: String?) {
+        guard let chatId, authManager.isAuthenticated else { return }
+        NotificationManager.shared.pendingChatId = nil
+        // Already looking at it.
+        if NotificationManager.shared.openChatId == chatId || selectedChat?.id == chatId { return }
+        if let chat = viewModel.chats.first(where: { $0.id == chatId }) {
+            selectedChat = chat
+            return
+        }
+        // Not in the list yet (e.g. the app was just opened from the notification): load it.
+        Task {
+            if let chat = try? await DatabaseManager.shared.fetchChat(id: chatId) {
+                await MainActor.run { selectedChat = chat }
+            }
+        }
+    }
+    
     private var chatsList: some View {
         List {
             ForEach(filteredChats) { chat in
-                ChatRow(chat: chat, settingsManager: settingsManager)
+                ChatRow(chat: chat, title: viewModel.title(for: chat), photoURL: viewModel.photoURL(for: chat))
                     .contentShape(Rectangle())
-                    .onTapGesture {
+                    .tapGlow {
+                        KeyboardDismisser.dismiss()
                         selectedChat = chat
                     }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            viewModel.deleteChat(chat)
+                    // Long-press menu instead of row swipes: horizontal swipes switch tabs.
+                    .contextMenu {
+                        Button {
+                            viewModel.markAsRead(chat)
                         } label: {
-                            Label("Delete", systemImage: "trash")
+                            Label("Mark as Read", systemImage: "checkmark.circle")
                         }
+                        .disabled(chat.unreadCount == 0)
                         
                         Button {
                             viewModel.togglePin(chat)
                         } label: {
-                            Label(chat.isPinned ? "Unpin" : "Pin", 
+                            Label(chat.isPinned ? "Unpin" : "Pin",
                                   systemImage: chat.isPinned ? "pin.slash" : "pin")
                         }
-                        .tint(.orange)
-                    }
-                    .swipeActions(edge: .leading) {
-                        Button {
-                            viewModel.markAsRead(chat)
+                        
+                        Button(role: .destructive) {
+                            viewModel.deleteChat(chat)
                         } label: {
-                            Label("Mark Read", systemImage: "checkmark.circle")
+                            Label("Delete Chat", systemImage: "trash")
                         }
-                        .tint(.blue)
                     }
             }
         }
         .listStyle(.plain)
+        .contentMargins(.bottom, DS.floatingTabBarClearance, for: .scrollContent)   // last row scrolls clear of the tab bar
     }
     
     private var filteredChats: [Chat] {
@@ -112,7 +152,7 @@ struct ComprehensiveChatsView: View {
             return sortedChats
         } else {
             return sortedChats.filter { chat in
-                chat.title.localizedCaseInsensitiveContains(searchText) ||
+                viewModel.title(for: chat).localizedCaseInsensitiveContains(searchText) ||
                 chat.lastMessage?.content.localizedCaseInsensitiveContains(searchText) == true
             }
         }
@@ -121,16 +161,26 @@ struct ComprehensiveChatsView: View {
 
 struct ChatRow: View {
     let chat: Chat
-    let settingsManager: SettingsManager
+    /// The other person's name (chats used to all be titled "Chat").
+    let title: String
+    let photoURL: String?
+    /// Incoming last messages are shown already translated into my language.
+    @ObservedObject private var translator = MessageTranslator.shared
+    
+    private var previewText: String? {
+        guard let last = chat.lastMessage else { return nil }
+        return translator.previewTranslation(text: last.content, senderId: last.senderId,
+                                             myUserId: AuthManager.shared.currentUserId) ?? last.content
+    }
     
     var body: some View {
         HStack(spacing: 12) {
             // Profile Image
             ProfileImageView(
-                imageURL: chat.imageURL,
-                placeholderText: chat.title.prefix(1).uppercased()
+                imageURL: photoURL ?? chat.imageURL,
+                placeholderText: Initials.from(title),
+                size: 44
             )
-            .frame(width: 50, height: 50)
             .overlay(
                 // Unread indicator
                 Circle()
@@ -148,7 +198,7 @@ struct ChatRow: View {
             
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(chat.title)
+                    Text(title)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.primary)
                         .lineLimit(1)
@@ -167,8 +217,8 @@ struct ChatRow: View {
                 }
                 
                 HStack {
-                    if let lastMessage = chat.lastMessage {
-                        Text(lastMessage.content)
+                    if let preview = previewText {
+                        Text(preview)
                             .font(.system(size: 14))
                             .foregroundColor(.secondary)
                             .lineLimit(2)
@@ -190,6 +240,11 @@ struct ChatRow: View {
             }
         }
         .padding(.vertical, 4)
+        .task(id: (chat.lastMessage?.content ?? "") + translator.myLanguage) {
+            guard let last = chat.lastMessage, last.type == .text else { return }
+            translator.translatePreview(text: last.content, senderId: last.senderId,
+                                        myUserId: AuthManager.shared.currentUserId)
+        }
     }
 }
 
@@ -197,36 +252,13 @@ struct EmptyChatsView: View {
     @Binding var showNewChat: Bool
     
     var body: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "message.circle")
-                .font(.system(size: 80))
-                .foregroundColor(.gray)
-            
-            VStack(spacing: 8) {
-                Text("No Conversations")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                
-                Text("Start a conversation with someone")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            
-            Button(action: { showNewChat = true }) {
-                HStack {
-                    Image(systemName: "plus.circle.fill")
-                    Text("Start New Chat")
-                }
-                .font(.headline)
-                .foregroundColor(.white)
-                .padding(.horizontal, 24)
-                .padding(.vertical, 12)
-                .background(Color.blue)
-                .cornerRadius(25)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            icon: "bubble.left.and.bubble.right",
+            title: "No Conversations",
+            message: "Start a conversation with someone.",
+            actionTitle: "Start New Chat",
+            action: { showNewChat = true }
+        )
         .background(Color(.systemGroupedBackground))
     }
 }
@@ -234,72 +266,108 @@ struct EmptyChatsView: View {
 class ComprehensiveChatsViewModel: ObservableObject {
     @Published var chats: [Chat] = []
     @Published var isLoading = false
-    @Published var error: Error?
+    @Published var errorMessage: String?
+    /// Other participants' names and photos, by user ID.
+    @Published private var names: [String: String] = [:]
+    @Published private var photos: [String: String] = [:]
     
     private let databaseManager = DatabaseManager.shared
+    private var cancellables = Set<AnyCancellable>()
+    private var lookedUp: Set<String> = []
     
     func loadChats() {
         guard let userId = AuthManager.shared.currentUserId else { return }
-        
-        isLoading = true
+        if chats.isEmpty { isLoading = true }
+        cancellables.removeAll()   // one poller at a time (each onAppear used to add another)
         
         databaseManager.listenForChats(userId: userId)
             .receive(on: DispatchQueue.main)
             .sink(
-                receiveCompletion: { [weak self] completion in
+                receiveCompletion: { [weak self] _ in
                     self?.isLoading = false
-                    if case .failure(let error) = completion {
-                        self?.error = error
-                    }
                 },
                 receiveValue: { [weak self] chats in
-                    self?.chats = chats
-                    self?.isLoading = false
+                    guard let self else { return }
+                    self.chats = chats
+                    self.isLoading = false
+                    self.lookUpNames(for: chats)
                 }
             )
             .store(in: &cancellables)
     }
     
     func refreshChats() async {
-        // Refresh is handled by the real-time listener
-        // This method exists for compatibility with refreshable modifier
+        // The list polls every few seconds; pull-to-refresh just restarts it immediately.
+        await MainActor.run { loadChats() }
+    }
+    
+    func otherUserId(in chat: Chat) -> String? {
+        let me = AuthManager.shared.currentUserId?.lowercased()
+        return chat.participants.first { $0.lowercased() != me }
+    }
+    
+    func title(for chat: Chat) -> String {
+        guard let other = otherUserId(in: chat) else { return "Chat" }
+        if let name = names[other], !name.isEmpty { return name }
+        if let contact = ContactManager.shared.contacts.first(where: { $0.userId?.lowercased() == other.lowercased() }) {
+            return contact.name
+        }
+        return "Let Talk User"
+    }
+    
+    func photoURL(for chat: Chat) -> String? {
+        otherUserId(in: chat).flatMap { photos[$0] }
+    }
+    
+    private func lookUpNames(for chats: [Chat]) {
+        let missing = Set(chats.compactMap(otherUserId(in:))).subtracting(lookedUp)
+        guard !missing.isEmpty else { return }
+        lookedUp.formUnion(missing)
+        for userId in missing {
+            Task {
+                guard let user = try? await databaseManager.getUser(id: userId) else { return }
+                await MainActor.run {
+                    self.names[userId] = user.name
+                    if let photo = user.photoURL { self.photos[userId] = photo }
+                }
+            }
+        }
     }
     
     func deleteChat(_ chat: Chat) {
+        chats.removeAll { $0.id == chat.id }
         Task {
             do {
                 try await databaseManager.deleteChat(chat.id)
             } catch {
-                self.error = error
+                await MainActor.run { self.errorMessage = "Couldn't delete the chat. Please try again." }
             }
         }
     }
     
     func togglePin(_ chat: Chat) {
+        let pinned = !chat.isPinned
+        if let index = chats.firstIndex(where: { $0.id == chat.id }) { chats[index].isPinned = pinned }
         Task {
             do {
-                try await databaseManager.pinChat(chat.id)
+                try await databaseManager.setChatPinned(chat.id, pinned: pinned)
             } catch {
-                self.error = error
+                await MainActor.run { self.errorMessage = "Couldn't update the chat. Please try again." }
             }
         }
     }
     
     func markAsRead(_ chat: Chat) {
+        if let index = chats.firstIndex(where: { $0.id == chat.id }) { chats[index].unreadCount = 0 }
         Task {
-            do {
-                try await databaseManager.markChatAsRead(chat.id)
-            } catch {
-                self.error = error
-            }
+            try? await databaseManager.markChatAsRead(chat.id)
         }
     }
     
     func clearChats() {
+        cancellables.removeAll()
         chats.removeAll()
     }
-    
-    private var cancellables = Set<AnyCancellable>()
 }
 
 // ProfileImageView is now defined in UIComponents.swift

@@ -2,9 +2,6 @@ import SwiftUI
 
 struct SplashScreenView: View {
     @State private var isAnimating = false
-    @State private var showOnboarding = false
-    @State private var showAuth = false
-    @State private var showMainApp = false
     
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var settingsManager: SettingsManager
@@ -71,34 +68,14 @@ struct SplashScreenView: View {
         .onAppear {
             startAnimation()
         }
-        .fullScreenCover(isPresented: $showOnboarding) {
-            OnboardingView()
-        }
-        .fullScreenCover(isPresented: $showAuth) {
-            AuthView()
-        }
-        .fullScreenCover(isPresented: $showMainApp) {
-            MainTabView()
-        }
+        // No navigation here: the app root (Let_Talk_3_0App) removes the splash and shows
+        // Onboarding / Sign In / MainTabView. The splash used to present those itself on the
+        // same 3-second timer, racing the root, and its MainTabView had no environment objects.
     }
     
     private func startAnimation() {
         withAnimation {
             isAnimating = true
-        }
-        
-        // Check if user has completed onboarding
-        let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
-        
-        // Simulate loading time and then navigate
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-            if !hasCompletedOnboarding {
-                showOnboarding = true
-            } else if !authManager.isAuthenticated {
-                showAuth = true
-            } else {
-                showMainApp = true
-            }
         }
     }
 }

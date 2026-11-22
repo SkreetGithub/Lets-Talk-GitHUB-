@@ -10,7 +10,9 @@ final class AuthManager: ObservableObject {
     @Published var currentUser: User?
     @Published var isLoading = false
     @Published var error: Error?
+    #if DEBUG
     @Published var isDemoMode = false
+    #endif
     @Published var needsPhoneVerification = false
 
     private let client = SupabaseManager.client
@@ -42,7 +44,7 @@ final class AuthManager: ObservableObject {
                 }
 
                 if let session = session {
-                    await fetchUserProfile(userId: session.user.id.uuidString)
+                    await fetchUserProfile(userId: session.user.id.uuidString.lowercased())
                 } else {
                     await MainActor.run {
                         self.currentUser = nil
@@ -63,49 +65,122 @@ final class AuthManager: ObservableObject {
 
         do {
             let session = try await client.auth.signIn(email: email, password: password)
-            await fetchUserProfile(userId: session.user.id.uuidString)
+            await fetchUserProfile(userId: session.user.id.uuidString.lowercased())
         } catch {
             await MainActor.run { self.error = error }
             throw error
         }
     }
 
-    func signUp(email: String, password: String, name: String) async throws {
+    /// Creates the account and its profile. Returns `true` when Supabase returned a session
+    /// (user is signed in now) and `false` when email confirmation is required first.
+    /// Name and phone are also stored in the auth user's metadata, so they are not lost when
+    /// the profile row can only be created after the email is confirmed.
+    @discardableResult
+    func signUp(email: String, password: String, name: String, phone: String = "",
+                gender: VoiceGender? = nil) async throws -> Bool {
         guard NetworkMonitorService.shared.isConnected else { throw AuthError.networkError }
         await MainActor.run { self.isLoading = true }
         defer { Task { @MainActor in self.isLoading = false } }
 
         do {
-            let response = try await client.auth.signUp(email: email, password: password)
+            var metadata: [String: AnyJSON] = ["name": .string(name), "phone": .string(phone)]
+            if let gender { metadata["gender"] = .string(gender.rawValue) }
+            let response = try await client.auth.signUp(
+                email: email,
+                password: password,
+                data: metadata
+            )
 
-            // If email confirmation is enabled, Supabase may return no session.
-            if let session = response.session {
-                let userId = session.user.id.uuidString
-                try await upsertProfile(ProfileRow(
-                    id: userId,
-                    email: email,
-                    name: name,
-                    phone: "",
-                    photoURL: nil,
-                    createdAt: Date(),
-                    lastSeen: Date(),
-                    isOnline: true,
-                    deviceTokens: nil,
-                    savedPhoneNumbers: []
-                ))
-                await fetchUserProfile(userId: userId)
-
-                await MainActor.run {
-                    self.needsPhoneVerification = true
-                }
-            } else {
-                // No session yet; user must confirm email.
+            guard let session = response.session else {
+                // Email confirmation is on: no session until the user taps the link.
                 await MainActor.run {
                     self.isAuthenticated = false
                     self.needsPhoneVerification = false
                 }
+                return false
+            }
+
+            let userId = session.user.id.uuidString.lowercased()
+            try await upsertProfile(ProfileRow(
+                id: userId,
+                email: email,
+                name: name,
+                phone: phone,
+                photoURL: nil,
+                createdAt: Date(),
+                lastSeen: Date(),
+                isOnline: true,
+                deviceTokens: nil,
+                savedPhoneNumbers: [],
+                gender: gender?.rawValue,
+                voiceId: gender?.defaultVoiceId
+            ))
+            // Sets isAuthenticated / needsPhoneVerification from the saved phone number.
+            await fetchUserProfile(userId: userId)
+            return true
+        } catch {
+            await MainActor.run { self.error = error }
+            throw error
+        }
+    }
+
+    /// Sign in with Apple, exchanged for a Supabase session. Requires the Apple provider
+    /// to be enabled in Supabase (Authentication -> Providers -> Apple).
+    func signInWithApple(credential: ASAuthorizationAppleIDCredential, rawNonce: String) async throws {
+        guard NetworkMonitorService.shared.isConnected else { throw AuthError.networkError }
+        guard let tokenData = credential.identityToken,
+              let idToken = String(data: tokenData, encoding: .utf8) else {
+            throw AuthError.custom("Apple did not return an identity token.")
+        }
+        await MainActor.run { self.isLoading = true }
+        defer { Task { @MainActor in self.isLoading = false } }
+
+        do {
+            let session = try await client.auth.signInWithIdToken(
+                credentials: OpenIDConnectCredentials(provider: .apple, idToken: idToken, nonce: rawNonce)
+            )
+            let userId = session.user.id.uuidString.lowercased()
+            await fetchUserProfile(userId: userId)
+
+            // Apple only sends the name on the first sign-in; keep it if we have it.
+            if let parts = credential.fullName {
+                let name = [parts.givenName, parts.familyName].compactMap { $0 }.joined(separator: " ")
+                if !name.isEmpty, currentUser?.name == "User" {
+                    try? await updateProfileFields(userId: userId, fields: ["name": .string(name)])
+                    await fetchUserProfile(userId: userId)
+                }
             }
         } catch {
+            await MainActor.run { self.error = error }
+            throw error
+        }
+    }
+
+    /// Sign in with Google through Supabase Auth (OAuth + PKCE in an in-app browser sheet).
+    /// Requires the Google provider in Supabase (Authentication → Providers → Google) and
+    /// lettalk://auth-callback in the allowed Redirect URLs. New users then follow the same
+    /// path as Sign in with Apple: profile created from the Google name/email, then the
+    /// phone-number step (needsPhoneVerification), then the translation consent on first use.
+    /// Returns false if the user closed the Google sheet.
+    @discardableResult
+    func signInWithGoogle() async throws -> Bool {
+        guard NetworkMonitorService.shared.isConnected else { throw AuthError.networkError }
+        await MainActor.run { self.isLoading = true }
+        defer { Task { @MainActor in self.isLoading = false } }
+
+        do {
+            let session = try await client.auth.signInWithOAuth(
+                provider: .google,
+                redirectTo: Config.authCallbackURL,
+                queryParams: [(name: "prompt", value: "select_account")]
+            )
+            await fetchUserProfile(userId: session.user.id.uuidString.lowercased())
+            return true
+        } catch {
+            if let webError = error as? ASWebAuthenticationSessionError, webError.code == .canceledLogin {
+                return false
+            }
             await MainActor.run { self.error = error }
             throw error
         }
@@ -125,6 +200,27 @@ final class AuthManager: ObservableObject {
             self.needsPhoneVerification = false
             self.isAuthenticated = true
         }
+    }
+
+    /// Settings › My Let Talk Number › Change. The database allows one change a year
+    /// (see supabase_migration_v9_number_rules.sql) and refuses numbers someone else has.
+    func changeNumber(to phoneNumber: String) async throws {
+        guard let userId = currentUserId else { throw AuthError.userNotFound }
+        try await updateProfileFields(userId: userId, fields: ["phone": .string(phoneNumber)])
+        await fetchUserProfile(userId: userId)
+    }
+
+    /// When the number was last picked or changed, and when it can next be changed.
+    func numberChangeDates() async -> (lastChanged: Date?, nextChange: Date?) {
+        guard let userId = currentUserId else { return (nil, nil) }
+        struct Row: Decodable { let phone_changed_at: String? }
+        guard let response = try? await client.from("profiles").select("phone_changed_at")
+                .eq("id", value: userId).limit(1).execute(),
+              let row = try? JSONDecoder().decode([Row].self, from: response.data).first,
+              let raw = row.phone_changed_at,
+              let last = PostgresDate.parse(raw) else { return (nil, nil) }
+        let next = Calendar.current.date(byAdding: .day, value: 365, to: last)
+        return (last, next.flatMap { $0 > Date() ? $0 : nil })
     }
 
     func signOut() async throws {
@@ -188,6 +284,30 @@ final class AuthManager: ObservableObject {
         await fetchUserProfile(userId: userId)
     }
 
+    /// Uploads a new profile photo to the private bucket and saves it on the profile.
+    func setProfilePhoto(_ image: UIImage) async throws {
+        guard let userId = currentUserId else { throw BackendError.notSignedIn }
+        let reference = try await SupabaseStorageService.shared.uploadProfilePhoto(image, userId: userId)
+        _ = try await client.from("profiles")
+            .update(ProfileUpdate(photoURL: reference))
+            .eq("id", value: userId)
+            .execute()
+        await MainActor.run { AvatarDirectory.shared.set(reference, for: userId) }
+        await fetchUserProfile(userId: userId)
+    }
+
+    /// Removes the profile photo (the initials show instead).
+    func removeProfilePhoto() async throws {
+        guard let userId = currentUserId else { throw BackendError.notSignedIn }
+        _ = try await client.from("profiles")
+            .update(PhotoClear())
+            .eq("id", value: userId)
+            .execute()
+        await SupabaseStorageService.shared.removeProfilePhotos(userId: userId)
+        await MainActor.run { AvatarDirectory.shared.set(nil, for: userId) }
+        await fetchUserProfile(userId: userId)
+    }
+
     func savePhoneNumber(_ phoneNumber: SavedPhoneNumber) async throws {
         guard let userId = currentUserId else { return }
 
@@ -207,6 +327,8 @@ final class AuthManager: ObservableObject {
 
     func updateOnlineStatus(isOnline: Bool) {
         guard let userId = currentUserId else { return }
+        // Settings › Show Online Status off: always appear offline to others.
+        let isOnline = isOnline && SettingsManager.shared.settings.privacy.showOnlineStatus
 
         Task {
             let update = ProfileUpdate(
@@ -223,16 +345,16 @@ final class AuthManager: ObservableObject {
     // MARK: - Account Management
 
     func deleteAccount() async throws {
-        // Client-side deletion of the auth user requires a service role key (server-side).
-        // Here we delete the profile row and sign out.
-        guard let userId = currentUserId else { return }
-
-        _ = try await client.from("profiles")
-            .delete()
-            .eq("id", value: userId)
-            .execute()
-
-        try await signOut()
+        // Server-side deletion (Edge Function `delete-account`, service role) removes the auth user
+        // and all of the user's data: messages, calls, contacts, blocks, tokens, storage, profile.
+        guard currentUserId != nil else { return }
+        try await Backend.deleteAccount()
+        try? await signOut()
+        await MainActor.run {
+            self.currentUser = nil
+            self.isAuthenticated = false
+            self.needsPhoneVerification = false
+        }
     }
 
     // MARK: - Session
@@ -240,7 +362,7 @@ final class AuthManager: ObservableObject {
     func refreshUserSession() async {
         do {
             let session = try await client.auth.session
-            await fetchUserProfile(userId: session.user.id.uuidString)
+            await fetchUserProfile(userId: session.user.id.uuidString.lowercased())
         } catch {
             // No session available or refresh failed.
             await MainActor.run {
@@ -253,52 +375,84 @@ final class AuthManager: ObservableObject {
 
     // MARK: - Private Supabase Helpers
 
+    /// Loads the signed-in user's profile.
+    ///
+    /// Previously any failure here (including a date-decoding failure that happened on EVERY
+    /// load) was treated as "profile missing": the code upserted a blank profile over the real
+    /// one (name "User", phone "") and set isAuthenticated = false. That is why every relaunch
+    /// landed on Sign In. Now:
+    ///  - the row is decoded with the Postgres date parser,
+    ///  - a blank profile is only INSERTED when no row exists (never overwrites),
+    ///  - a network/server error keeps the user signed in with their existing session.
     private func fetchUserProfile(userId: String) async {
+        let rows: [ProfileRow]
         do {
             let response = try await client.from("profiles")
                 .select()
                 .eq("id", value: userId)
-                .single()
+                .limit(1)
                 .execute()
+            rows = try PostgresDate.decoder.decode([ProfileRow].self, from: response.data)
+        } catch {
+            debugLog("Profile fetch failed:", error)
+            let sessionUser = try? await client.auth.session.user
+            await MainActor.run {
+                self.error = error
+                // The Supabase session is valid; don't bounce the user to Sign In over a
+                // transient failure. Keep the last known profile, or a minimal one.
+                if self.currentUser == nil {
+                    self.currentUser = User(id: userId, email: sessionUser?.email ?? "",
+                                            name: "User", phone: "", photoURL: nil)
+                }
+                self.needsPhoneVerification = false
+                self.isAuthenticated = true
+            }
+            return
+        }
 
-            let row = try JSONDecoder().decode(ProfileRow.self, from: response.data)
-
+        if let row = rows.first {
             await MainActor.run {
                 self.currentUser = row.asUser
                 self.needsPhoneVerification = row.phone.isEmpty
                 self.isAuthenticated = !row.phone.isEmpty
             }
-        } catch {
-            // If the profile doesn't exist yet, create a minimal one.
-            do {
-                let email = (try? await client.auth.session)?.user.email ?? ""
-                try await upsertProfile(ProfileRow(
-                    id: userId,
-                    email: email,
-                    name: "User",
-                    phone: "",
-                    photoURL: nil,
-                    createdAt: Date(),
-                    lastSeen: Date(),
-                    isOnline: true,
-                    deviceTokens: nil,
-                    savedPhoneNumbers: []
-                ))
-
-                await MainActor.run {
-                    self.currentUser = User(id: userId, email: email, name: "User", phone: "", photoURL: nil)
-                    self.needsPhoneVerification = true
-                    self.isAuthenticated = false
-                }
-            } catch {
-                await MainActor.run {
-                    self.error = error
-                    self.currentUser = User(id: userId, email: "", name: "User", phone: "", photoURL: nil)
-                    self.needsPhoneVerification = true
-                    self.isAuthenticated = false
-                }
-            }
+            return
         }
+
+        // No profile row yet (e.g. first sign-in after confirming email). Create one from the
+        // auth user's metadata, insert-only so it can never replace a real profile.
+        let user = try? await client.auth.session.user
+        // "name" from email sign-up; "full_name" is what Google (and other OAuth providers) send.
+        let name = Self.metadataString(user?.userMetadata["name"])
+            ?? Self.metadataString(user?.userMetadata["full_name"])
+            ?? "User"
+        let phone = Self.metadataString(user?.userMetadata["phone"]) ?? ""
+        let email = user?.email ?? ""
+        let gender = Self.metadataString(user?.userMetadata["gender"]).flatMap(VoiceGender.init(rawValue:))
+        let newRow = ProfileRow(
+            id: userId, email: email, name: name, phone: phone, photoURL: nil,
+            createdAt: Date(), lastSeen: Date(), isOnline: true,
+            deviceTokens: nil, savedPhoneNumbers: [],
+            gender: gender?.rawValue, voiceId: gender?.defaultVoiceId
+        )
+        do {
+            _ = try await client.from("profiles")
+                .upsert(newRow, onConflict: "id", ignoreDuplicates: true)
+                .execute()
+        } catch {
+            debugLog("Profile create failed:", error)
+            await MainActor.run { self.error = error }
+        }
+        await MainActor.run {
+            self.currentUser = newRow.asUser
+            self.needsPhoneVerification = phone.isEmpty
+            self.isAuthenticated = !phone.isEmpty
+        }
+    }
+
+    private static func metadataString(_ value: AnyJSON?) -> String? {
+        guard case let .string(text)? = value, !text.isEmpty else { return nil }
+        return text
     }
 
     private func upsertProfile(_ row: ProfileRow) async throws {
@@ -307,8 +461,36 @@ final class AuthManager: ObservableObject {
             .execute()
     }
 
-    private func updateProfileFields(userId: String, fields: [String: AnyJSON]) async throws {
-        // Convert AnyJSON to ProfileUpdate struct
+    /// Saves "my language" to the profile, so message notifications arrive translated into it.
+    func syncLanguage(_ code: String) async {
+        guard let userId = currentUserId else { return }
+        struct LanguageUpdate: Encodable { let language: String }
+        _ = try? await client.from("profiles")
+            .update(LanguageUpdate(language: code))
+            .eq("id", value: userId)
+            .execute()
+    }
+
+    /// Saves the translation voice others hear for this user ("male-1" … "female-8").
+    func updateVoice(_ voiceId: String) async throws {
+        guard let userId = currentUserId else { throw AuthError.userNotFound }
+        let gender: VoiceGender = voiceId.hasPrefix(VoiceGender.female.rawValue) ? .female : .male
+        struct VoiceUpdate: Encodable {
+            let gender: String
+            let voice_id: String
+        }
+        _ = try await client.from("profiles")
+            .update(VoiceUpdate(gender: gender.rawValue, voice_id: voiceId))
+            .eq("id", value: userId)
+            .execute()
+        await MainActor.run {
+            self.currentUser?.gender = gender
+            self.currentUser?.voiceId = voiceId
+        }
+    }
+
+    private func updateProfileFields(userId: String, fields: [String: ProfileValue]) async throws {
+        // Convert ProfileValue to ProfileUpdate struct
         var update = ProfileUpdate()
         
         for (key, value) in fields {
@@ -411,6 +593,10 @@ struct User: Identifiable, Codable {
     var deviceTokens: [String]?
     var settings: UserSettings?
     var savedPhoneNumbers: [SavedPhoneNumber] = []
+    /// Kind of voice others hear for this user's translated speech (nil for older accounts).
+    var gender: VoiceGender?
+    /// Selected translation voice, e.g. "female-3" (nil = the default for `gender`).
+    var voiceId: String?
 
     struct UserSettings: Codable {
         var notifications: Bool
@@ -441,6 +627,15 @@ struct User: Identifiable, Codable {
 }
 
 // MARK: - Supabase Row + JSON Helpers
+
+/// Sets profiles.photo_url to null (ProfileUpdate leaves out fields that are nil).
+private struct PhotoClear: Encodable {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeNil(forKey: .photoURL)
+    }
+    enum CodingKeys: String, CodingKey { case photoURL = "photo_url" }
+}
 
 private struct ProfileUpdate: Codable {
     var name: String?
@@ -480,6 +675,10 @@ private struct ProfileRow: Codable {
     let isOnline: Bool
     let deviceTokens: [String]?
     let savedPhoneNumbers: [SavedPhoneNumber]
+    // Optional so rows saved before these columns existed still decode, and nil values are
+    // left out of upserts instead of overwriting a saved choice.
+    var gender: String? = nil
+    var voiceId: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -492,6 +691,8 @@ private struct ProfileRow: Codable {
         case isOnline = "is_online"
         case deviceTokens = "device_tokens"
         case savedPhoneNumbers = "saved_phone_numbers"
+        case gender
+        case voiceId = "voice_id"
     }
 
     var asUser: User {
@@ -507,27 +708,51 @@ private struct ProfileRow: Codable {
         )
         u.deviceTokens = deviceTokens
         u.savedPhoneNumbers = savedPhoneNumbers
+        u.gender = gender.flatMap(VoiceGender.init(rawValue:))
+        u.voiceId = voiceId
         return u
     }
 }
 
-private enum AnyJSON {
+extension ProfileRow {
+    /// Lenient decoder: a null or missing column falls back to a default instead of failing
+    /// the whole profile load. (Defined in an extension so the memberwise init is kept.)
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        email = (try? c.decodeIfPresent(String.self, forKey: .email)) ?? ""
+        name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? "User"
+        phone = (try? c.decodeIfPresent(String.self, forKey: .phone)) ?? ""
+        photoURL = try? c.decodeIfPresent(String.self, forKey: .photoURL)
+        createdAt = (try? c.decodeIfPresent(Date.self, forKey: .createdAt)) ?? Date()
+        lastSeen = (try? c.decodeIfPresent(Date.self, forKey: .lastSeen)) ?? Date()
+        isOnline = (try? c.decodeIfPresent(Bool.self, forKey: .isOnline)) ?? false
+        deviceTokens = try? c.decodeIfPresent([String].self, forKey: .deviceTokens)
+        savedPhoneNumbers = (try? c.decodeIfPresent([SavedPhoneNumber].self, forKey: .savedPhoneNumbers)) ?? []
+        // These two were never read back, so every profile reload wiped the chosen voice in the
+        // app (Edit Profile showed "Not set" and calls used the iPhone voice) even though it was saved.
+        gender = try? c.decodeIfPresent(String.self, forKey: .gender)
+        voiceId = try? c.decodeIfPresent(String.self, forKey: .voiceId)
+    }
+}
+
+private enum ProfileValue {
     case string(String)
     case bool(Bool)
     case number(Double)
-    case array([AnyJSON])
-    case object([String: AnyJSON])
+    case array([ProfileValue])
+    case object([String: ProfileValue])
     case null
 
-    static func any(_ value: Any) -> AnyJSON {
+    static func any(_ value: Any) -> ProfileValue {
         switch value {
         case let v as String: return .string(v)
         case let v as Bool: return .bool(v)
         case let v as Int: return .number(Double(v))
         case let v as Double: return .number(v)
-        case let v as [Any]: return .array(v.map(AnyJSON.any))
+        case let v as [Any]: return .array(v.map(ProfileValue.any))
         case let v as [String: Any]:
-            return .object(v.mapValues(AnyJSON.any))
+            return .object(v.mapValues(ProfileValue.any))
         default:
             return .null
         }

@@ -68,7 +68,7 @@ struct OfflineIndicatorView: View {
                         } else {
                             Button(action: {
                                 Task {
-                                    await dataPersistence.syncWithFirebase()
+                                    await dataPersistence.syncWithSupabase()
                                 }
                             }) {
                                 HStack {
@@ -175,7 +175,7 @@ struct OfflineSettingsView: View {
                     
                     Button(action: {
                         Task {
-                            await dataPersistence.syncWithFirebase()
+                            await dataPersistence.syncWithSupabase()
                         }
                     }) {
                         HStack {

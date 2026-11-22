@@ -3,16 +3,22 @@ import Foundation
 
 struct DynamicIslandViews: View {
     @StateObject private var notificationManager = NotificationManager.shared
-    private let webRTCService = WebRTCService()
     
     var body: some View {
         ZStack {
             if let message = notificationManager.currentMessage {
                 MessageIslandView(
-                    message: message.0,
-                    sender: message.1,
-                    profileImage: message.2
+                    message: message.text,
+                    sender: message.senderName,
+                    senderId: message.senderId,
+                    profileImage: message.photo
                 )
+                .onTapGesture {
+                    // Tapping the banner opens that conversation.
+                    if let chatId = message.chatId { notificationManager.pendingChatId = chatId }
+                    notificationManager.dismissMessageBanner()
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
             
@@ -22,16 +28,23 @@ struct DynamicIslandViews: View {
                     isVideoCall: call.isVideoCall,
                     callerImage: call.callerImage,
                     onAccept: {
-                        // webRTCService.acceptCall() // TODO: Implement acceptCall method
+                        IncomingCallManager.shared.answerIncomingCall()
+                        if let incoming = IncomingCallManager.shared.currentIncomingCall {
+                            Task {
+                                try? await WebRTCCallManager.shared.answerCall(callId: incoming.id, isVideo: incoming.isVideo)
+                            }
+                        }
+                        notificationManager.currentCall = nil
                     },
                     onDecline: {
-                        // webRTCService.rejectCall() // TODO: Implement rejectCall method
+                        IncomingCallManager.shared.rejectIncomingCall()
+                        notificationManager.currentCall = nil
                     }
                 )
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .animation(.spring(response: 0.5, dampingFraction: 0.8), value: notificationManager.currentMessage?.0)
+        .animation(.spring(response: 0.5, dampingFraction: 0.8), value: notificationManager.currentMessage)
         .animation(.spring(response: 0.5, dampingFraction: 0.8), value: notificationManager.currentCall)
     }
 }
@@ -39,46 +52,14 @@ struct DynamicIslandViews: View {
 struct MessageIslandView: View {
     let message: String
     let sender: String
+    var senderId: String? = nil
     let profileImage: String?
     @State private var isExpanded = false
     
     var body: some View {
         HStack(spacing: 12) {
-            // Profile Image
-            if let imageUrl = profileImage {
-                AsyncImage(url: URL(string: imageUrl)) { image in
-                    image.resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 40, height: 40)
-                        .clipShape(Circle())
-                } placeholder: {
-                    Circle()
-                        .fill(LinearGradient(
-                            gradient: Gradient(colors: [.blue, .purple]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ))
-                        .frame(width: 40, height: 40)
-                        .overlay(
-                            Text(sender.prefix(1).uppercased())
-                                .font(.headline)
-                                .foregroundColor(.white)
-                        )
-                }
-            } else {
-                Circle()
-                    .fill(LinearGradient(
-                        gradient: Gradient(colors: [.blue, .purple]),
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 40, height: 40)
-                    .overlay(
-                        Text(sender.prefix(1).uppercased())
-                            .font(.headline)
-                            .foregroundColor(.white)
-                    )
-            }
+            // The sender's photo (private photos and initials handled by ProfileImageView)
+            UserAvatar(userId: senderId, name: sender, fallbackURL: profileImage, size: 40)
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(sender)
@@ -125,40 +106,7 @@ struct CallIslandView: View {
         HStack(spacing: 12) {
             // Caller Image with pulsing effect
             ZStack {
-                if let imageUrl = callerImage {
-                    AsyncImage(url: URL(string: imageUrl)) { image in
-                        image.resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 50, height: 50)
-                            .clipShape(Circle())
-                    } placeholder: {
-                        Circle()
-                            .fill(LinearGradient(
-                                gradient: Gradient(colors: [.green, .blue]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ))
-                            .frame(width: 50, height: 50)
-                            .overlay(
-                                Text(caller.prefix(1).uppercased())
-                                    .font(.title2)
-                                    .foregroundColor(.white)
-                            )
-                    }
-                } else {
-                    Circle()
-                        .fill(LinearGradient(
-                            gradient: Gradient(colors: [.green, .blue]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ))
-                        .frame(width: 50, height: 50)
-                        .overlay(
-                            Text(caller.prefix(1).uppercased())
-                                .font(.title2)
-                                .foregroundColor(.white)
-                        )
-                }
+                ProfileImageView(imageURL: callerImage, placeholderText: Initials.from(caller), size: 50)
                 
                 // Pulsing ring
                 Circle()

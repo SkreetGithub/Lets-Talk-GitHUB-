@@ -8,11 +8,8 @@ final class DatabaseManager: ObservableObject {
     private let client = SupabaseManager.client
     private var listeners: [String: AnyCancellable] = [:]
 
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        return d
-    }()
+    // .iso8601 rejects Supabase's fractional seconds ("...04.174123+00:00"), so rows failed to decode.
+    private let decoder: JSONDecoder = PostgresDate.decoder
 
     private init() {}
 
@@ -75,7 +72,9 @@ final class DatabaseManager: ObservableObject {
                         let messages = try await self.fetchMessages(chatId: chatId)
                         subject.send(messages)
                     } catch {
-                        subject.send(completion: .failure(error))
+                        // A dropped connection used to END the stream, so the chat stopped updating
+                        // for good. Skip this tick; the next poll tries again.
+                        debugLog("Message poll failed: \(error)")
                     }
                 }
             }
@@ -85,15 +84,17 @@ final class DatabaseManager: ObservableObject {
     }
 
     private func fetchMessages(chatId: String) async throws -> [Message] {
+        // The NEWEST 50 (ascending + limit returned the oldest 50, so once a chat passed 50
+        // messages new ones never appeared). Reversed back into reading order.
         let response = try await client.from("messages")
             .select()
             .eq("chat_id", value: chatId)
-            .order("timestamp", ascending: true)
+            .order("timestamp", ascending: false)
             .limit(50)
             .execute()
 
         let rows = try decoder.decode([MessageRow].self, from: response.data)
-        return rows.map { $0.asMessage }
+        return rows.reversed().map { $0.asMessage }
     }
 
     // MARK: - Chats
@@ -130,6 +131,21 @@ final class DatabaseManager: ObservableObject {
         )
     }
 
+    /// Opens (creating if needed) the 1:1 chat with a saved contact.
+    /// A contact is an address-book entry, so the person's Let Talk account is found from the
+    /// contact's linked user ID or, failing that, its phone number. (Chats used to be created with
+    /// the contact ROW id, which is nobody's account, so messages never reached anyone.)
+    func openChat(with contact: Contact) async throws -> Chat {
+        guard let me = AuthManager.shared.currentUserId?.lowercased() else { throw ChatError.notSignedIn }
+        var otherUserId = contact.userId?.lowercased()
+        if otherUserId == nil, contact.phone.filter(\.isNumber).count >= 7 {
+            otherUserId = try await findUserId(byPhone: contact.phone)?.lowercased()
+        }
+        guard let otherUserId else { throw ChatError.notOnLetTalk(contact.name) }
+        guard otherUserId != me else { throw ChatError.ownAccount }
+        return try await createOrUpdateChat(senderId: me, receiverId: otherUserId)
+    }
+
     func listenForChats(userId: String) -> AnyPublisher<[Chat], Error> {
         let subject = PassthroughSubject<[Chat], Error>()
 
@@ -143,7 +159,7 @@ final class DatabaseManager: ObservableObject {
                         let chats = try await self.fetchChats(userId: userId)
                         subject.send(chats)
                     } catch {
-                        subject.send(completion: .failure(error))
+                        debugLog("Chat list poll failed: \(error)")   // retried on the next tick
                     }
                 }
             }
@@ -154,13 +170,26 @@ final class DatabaseManager: ObservableObject {
 
     private func fetchChats(userId: String) async throws -> [Chat] {
         // Assumes `chats.participants` is a Postgres text[] column.
+        // Chats I deleted stay for the other person; they're only hidden from me (hidden_for).
+        let me = userId.lowercased()
         let response = try await client.from("chats")
             .select()
             .contains("participants", value: [userId])
+            .not("hidden_for", operator: .cs, value: "{\(me)}")
             .execute()
 
         let rows = try decoder.decode([ChatRowData].self, from: response.data)
         return rows.map { $0.asChat }
+    }
+
+    /// One chat by ID (only returned if I'm in it), e.g. to open it from a notification.
+    func fetchChat(id: String) async throws -> Chat? {
+        let response = try await client.from("chats")
+            .select()
+            .eq("id", value: id)
+            .limit(1)
+            .execute()
+        return try decoder.decode([ChatRowData].self, from: response.data).first?.asChat
     }
 
     // MARK: - Users
@@ -174,6 +203,64 @@ final class DatabaseManager: ObservableObject {
 
         let profile = try decoder.decode(ProfileLookupRow.self, from: response.data)
         return profile.asUser
+    }
+
+    /// Finds the Let Talk user who owns a phone number, or nil if nobody does.
+    /// Numbers are stored in more than one format ("4704588823" from sign-up,
+    /// "(470) 458-8823" from the number picker), so every common format is tried.
+    func findUserId(byPhone raw: String) async throws -> String? {
+        let digits = raw.filter(\.isNumber)
+        guard digits.count >= 7 else { return nil }
+        let last10 = String(digits.suffix(10))
+        var candidates: Set<String> = [digits, last10, "1" + last10]
+        if last10.count == 10 {
+            let a = last10.prefix(3), b = last10.dropFirst(3).prefix(3), c = last10.suffix(4)
+            candidates.formUnion(["(\(a)) \(b)-\(c)", "\(a)-\(b)-\(c)", "\(a) \(b) \(c)"])
+        }
+
+        // PostgREST needs values containing ( ) , or spaces to be double-quoted inside in.(...),
+        // and supabase-swift does not quote them, so the old query never matched "(470) 789-6062".
+        // "+" variants are left out: an unescaped "+" in a query string is decoded as a space.
+        let quoted = candidates.map { "\"\($0)\"" }
+        let response = try await client.from("profiles")
+            .select("id, phone")
+            .in("phone", values: quoted)
+            .limit(5)
+            .execute()
+
+        struct Row: Decodable { let id: String; let phone: String? }
+        let rows = try decoder.decode([Row].self, from: response.data)
+        // Prefer the row whose digits really match (guards against a short-number collision).
+        return rows.first { ($0.phone ?? "").filter(\.isNumber).hasSuffix(last10) }?.id ?? rows.first?.id
+    }
+
+    /// Finds the Let Talk user with this email address (case-insensitive), or nil.
+    func findUserId(byEmail raw: String) async throws -> String? {
+        let email = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard email.contains("@"), email.contains(".") else { return nil }
+        let response = try await client.from("profiles")
+            .select("id")
+            .ilike("email", pattern: email)
+            .limit(1)
+            .execute()
+        struct Row: Decodable { let id: String }
+        return try decoder.decode([Row].self, from: response.data).first?.id
+    }
+
+    /// New Message › typed number or email: opens (creating if needed) the chat with whoever
+    /// owns it. Throws `notOnLetTalk` when nobody does.
+    func openChat(withNumberOrEmail query: String) async throws -> Chat {
+        guard let me = AuthManager.shared.currentUserId?.lowercased() else { throw ChatError.notSignedIn }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let otherUserId: String?
+        if trimmed.contains("@") {
+            otherUserId = try await findUserId(byEmail: trimmed)
+        } else {
+            otherUserId = try await findUserId(byPhone: trimmed)
+        }
+        guard let other = otherUserId?.lowercased() else { throw ChatError.notOnLetTalk(trimmed) }
+        guard other != me else { throw ChatError.ownAccount }
+        return try await createOrUpdateChat(senderId: me, receiverId: other)
     }
 
     func searchUsers(query: String) async throws -> [User] {
@@ -223,6 +310,38 @@ final class DatabaseManager: ObservableObject {
             .execute()
     }
 
+    /// Adds a Let Talk user (e.g. from a scanned QR code) as a contact, using their profile's
+    /// name, phone and email. Adding the same person twice is a no-op.
+    func addContact(letTalkUserId userId: String) async throws -> Contact {
+        guard let ownerId = AuthManager.shared.currentUserId else { throw QRAddError.notSignedIn }
+
+        let user: User
+        do {
+            user = try await getUser(id: userId)
+        } catch {
+            throw QRAddError.accountNotFound
+        }
+
+        let row = ContactInsert(
+            id: UUID().uuidString,
+            ownerId: ownerId,
+            name: user.name,
+            phone: user.phone,
+            email: user.email,
+            createdAt: ISO8601DateFormatter().string(from: Date()),
+            contactUserId: userId
+        )
+        // Unique (owner_id, contact_user_id): a second scan of the same code adds nothing.
+        _ = try await client.from("contacts")
+            .upsert(row, onConflict: "owner_id,contact_user_id", ignoreDuplicates: true)
+            .execute()
+
+        var contact = Contact(id: row.id, name: user.name, phone: user.phone, email: user.email)
+        contact.userId = userId
+        contact.imageURL = user.photoURL
+        return contact
+    }
+
     func deleteContact(_ contactId: String) async throws {
         _ = try await client.from("contacts")
             .delete()
@@ -232,30 +351,81 @@ final class DatabaseManager: ObservableObject {
 
     // MARK: - Calls
 
+    /// Recent calls for the Calls tab, newest first. (This used to always return an empty list,
+    /// so call history never showed anything.)
     func fetchCalls() async throws -> [CallRecord] {
-        // TODO: Implement calls table in Supabase.
-        return []
+        guard let me = AuthManager.shared.currentUserId?.lowercased() else { return [] }
+
+        let response = try await client.from("calls")
+            .select("id, caller_id, callee_id, is_video, status, created_at, answered_at, ended_at")
+            .contains("participants", value: [me])
+            .not("hidden_for", operator: .cs, value: "{\(me)}")   // calls I deleted
+            .order("created_at", ascending: false)
+            .limit(100)
+            .execute()
+        let rows = try decoder.decode([CallHistoryRow].self, from: response.data)
+
+        // Names: saved contacts first, then the other person's profile.
+        let others = Set(rows.map { $0.callerId.lowercased() == me ? $0.calleeId : $0.callerId })
+        var people: [String: Contact] = [:]
+        let saved = await MainActor.run { ContactManager.shared.contacts }
+        for id in others {
+            if let contact = saved.first(where: { $0.userId?.lowercased() == id.lowercased() }) {
+                people[id] = contact
+            } else if let user = try? await getUser(id: id) {
+                var contact = Contact(id: id, name: user.name, phone: user.phone, email: user.email)
+                contact.userId = id
+                contact.imageURL = user.photoURL
+                people[id] = contact
+            }
+        }
+
+        return rows.map { row in
+            let outgoing = row.callerId.lowercased() == me
+            let otherId = outgoing ? row.calleeId : row.callerId
+            var contact = people[otherId] ?? Contact(id: otherId, name: "Let Talk User", phone: "", email: "")
+            contact.userId = otherId
+            let duration: Int
+            if let answered = row.answeredAt, let ended = row.endedAt {
+                duration = max(0, Int(ended.timeIntervalSince(answered)))
+            } else {
+                duration = 0
+            }
+            let neverAnswered = row.answeredAt == nil && row.status != "initiated" && row.status != "ringing"
+            return CallRecord(
+                id: row.id,
+                contact: contact,
+                type: row.isVideo ? .video : .audio,
+                timestamp: row.createdAt,
+                duration: duration,
+                isMissed: !outgoing && (row.status == "missed" || neverAnswered),
+                direction: outgoing ? .outgoing : .incoming
+            )
+        }
     }
 
+    /// Removes a call from MY history only; the other person still sees it.
+    /// (This used to delete the row for both people.)
     func deleteCall(_ callId: String) async throws {
-        _ = try await client.from("calls")
-            .delete()
-            .eq("id", value: callId)
-            .execute()
+        _ = try await client.rpc("hide_call", params: ["p_call_id": callId]).execute()
     }
 
     // MARK: - Chat Management
 
+    /// Removes a chat from MY list only; the other person keeps it. A new message in the chat
+    /// brings it back. (This used to delete the chat for both people.)
     func deleteChat(_ chatId: String) async throws {
-        _ = try await client.from("chats")
-            .delete()
-            .eq("id", value: chatId)
-            .execute()
+        _ = try await client.rpc("hide_chat", params: ["p_chat_id": chatId]).execute()
     }
 
     func pinChat(_ chatId: String) async throws {
+        try await setChatPinned(chatId, pinned: true)
+    }
+
+    /// Pins or unpins a chat (unpin used to be impossible: the button always pinned).
+    func setChatPinned(_ chatId: String, pinned: Bool) async throws {
         _ = try await client.from("chats")
-            .update(["is_pinned": true])
+            .update(["is_pinned": pinned])
             .eq("id", value: chatId)
             .execute()
     }
@@ -267,12 +437,19 @@ final class DatabaseManager: ObservableObject {
             .execute()
     }
 
+    /// Read receipts. Only the receiver can mark a message read, and only `read_at`/`status`
+    /// change (enforced on the server). The old direct update was always rejected: the
+    /// database only let the SENDER update a message, so nothing was ever marked read.
+    func markMessageRead(_ messageId: String) async throws {
+        _ = try await client.rpc("mark_message_read", params: ["p_message_id": messageId]).execute()
+    }
+
     func markMessagesAsRead(_ messageIds: [String]) async throws {
-        for messageId in messageIds {
-            _ = try await client.from("messages")
-                .update(["status": "read"])
-                .eq("id", value: messageId)
-                .execute()
+        guard !messageIds.isEmpty else { return }
+        if messageIds.count == 1 {
+            try await markMessageRead(messageIds[0])
+        } else {
+            _ = try await client.rpc("mark_messages_read", params: ["p_message_ids": messageIds]).execute()
         }
     }
 
@@ -317,7 +494,8 @@ final class DatabaseManager: ObservableObject {
         
         let updateData = ChatUpdate(
             lastMessage: lastMessage,
-            lastUpdated: ISO8601DateFormatter().string(from: Date())
+            lastUpdated: ISO8601DateFormatter().string(from: Date()),
+            hiddenFor: []   // a new message brings a deleted chat back for both people
         )
 
         _ = try await client.from("chats")
@@ -374,10 +552,12 @@ private struct ChatInsert: Codable {
 private struct ChatUpdate: Codable {
     let lastMessage: ChatLastMessageUpdate?
     let lastUpdated: String
+    let hiddenFor: [String]
     
     enum CodingKeys: String, CodingKey {
         case lastMessage = "last_message"
         case lastUpdated = "last_updated"
+        case hiddenFor = "hidden_for"
     }
 }
 
@@ -404,6 +584,8 @@ private struct ContactInsert: Codable {
     let phone: String
     let email: String
     let createdAt: String
+    /// Set only when the contact is a known Let Talk user (omitted from the JSON when nil).
+    var contactUserId: String? = nil
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -412,6 +594,7 @@ private struct ContactInsert: Codable {
         case phone
         case email
         case createdAt = "created_at"
+        case contactUserId = "contact_user_id"
     }
 }
 
@@ -429,6 +612,7 @@ private struct MessageRow: Codable {
     let translation: String?
     let attachments: [Message.Attachment]?
     let metadata: [String: String]?
+    let readAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -442,6 +626,7 @@ private struct MessageRow: Codable {
         case translation
         case attachments
         case metadata
+        case readAt = "read_at"
     }
     
     init(from decoder: Decoder) throws {
@@ -455,6 +640,7 @@ private struct MessageRow: Codable {
         status = try container.decode(String.self, forKey: .status)
         isEncrypted = try container.decode(Bool.self, forKey: .isEncrypted)
         translation = try container.decodeIfPresent(String.self, forKey: .translation)
+        readAt = try container.decodeIfPresent(Date.self, forKey: .readAt)
         
         // Decode attachments from JSON string if present
         if let attachmentsString = try? container.decodeIfPresent(String.self, forKey: .attachments),
@@ -482,11 +668,12 @@ private struct MessageRow: Codable {
             type: Message.MessageType(rawValue: type) ?? .text,
             attachments: attachments,
             timestamp: timestamp,
-            status: Message.MessageStatus(rawValue: status) ?? .sent,
+            status: readAt != nil ? .read : (Message.MessageStatus(rawValue: status) ?? .sent),
             isEncrypted: isEncrypted
         )
         m.translation = translation
         m.metadata = metadata
+        m.readAt = readAt
         return m
     }
 }
@@ -552,6 +739,28 @@ private struct ChatLastMessageRow: Codable {
     }
 }
 
+private struct CallHistoryRow: Decodable {
+    let id: String
+    let callerId: String
+    let calleeId: String
+    let isVideo: Bool
+    let status: String
+    let createdAt: Date
+    let answeredAt: Date?
+    let endedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case callerId = "caller_id"
+        case calleeId = "callee_id"
+        case isVideo = "is_video"
+        case status
+        case createdAt = "created_at"
+        case answeredAt = "answered_at"
+        case endedAt = "ended_at"
+    }
+}
+
 private struct ContactRowData: Codable {
     let id: String
     let name: String
@@ -561,12 +770,14 @@ private struct ContactRowData: Codable {
     let imageURL: String?
     let lastSeen: Date?
     let isOnline: Bool?
+    let contactUserId: String?
 
     enum CodingKeys: String, CodingKey {
         case id
         case name
         case phone
         case email
+        case contactUserId = "contact_user_id"
         case lastMessage = "last_message"
         case imageURL = "image_url"
         case lastSeen = "last_seen"
@@ -578,6 +789,7 @@ private struct ContactRowData: Codable {
         c.imageURL = imageURL
         c.lastSeen = lastSeen
         c.isOnline = isOnline ?? false
+        c.userId = contactUserId
         return c
     }
 }
@@ -588,6 +800,8 @@ private struct ProfileLookupRow: Codable {
     let name: String
     let phone: String
     let photoURL: String?
+    let lastSeen: Date?
+    let isOnline: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -595,10 +809,13 @@ private struct ProfileLookupRow: Codable {
         case name
         case phone
         case photoURL = "photo_url"
+        case lastSeen = "last_seen"
+        case isOnline = "is_online"
     }
 
     var asUser: User {
-        User(id: id, email: email, name: name, phone: phone, photoURL: photoURL)
+        User(id: id, email: email, name: name, phone: phone, photoURL: photoURL,
+             lastSeen: lastSeen, isOnline: isOnline ?? false)
     }
 }
 
@@ -630,5 +847,24 @@ struct Chat: Identifiable, Codable {
         let timestamp: Date
         let type: Message.MessageType
         var isRead: Bool = false
+    }
+}
+
+/// Why a chat couldn't be opened, in words the user can act on.
+enum ChatError: LocalizedError {
+    case notSignedIn
+    case notOnLetTalk(String)
+    case ownAccount
+
+    var errorDescription: String? {
+        switch self {
+        case .notSignedIn:
+            return "Please sign in again to send messages."
+        case .notOnLetTalk(let name):
+            let who = name.isEmpty ? "This contact" : name
+            return "\(who) isn't on Let Talk yet. Invite them from their contact card so you can chat."
+        case .ownAccount:
+            return "That's your own account. Pick someone else to chat with."
+        }
     }
 }

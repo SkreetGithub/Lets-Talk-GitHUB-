@@ -2,56 +2,36 @@ import Foundation
 import WebRTC
 
 // MARK: - STUN/TURN Server Configuration
-class STUNTurnConfiguration {
+//
+// STUN finds a direct path between two phones. When there is none (cellular carrier NAT, strict
+// office Wi-Fi), media must be relayed through TURN. TURN credentials are short-lived and come from
+// the `turn-credentials` Edge Function (Cloudflare Realtime TURN), never from the app bundle.
+final class STUNTurnConfiguration {
     static let shared = STUNTurnConfiguration()
-    
-    // Free STUN servers
-    private let stunServers = [
+
+    /// Used when TURN credentials can't be fetched: calls still work on most home/office networks.
+    /// (The old list had 16 servers, many long dead, which only slowed ICE gathering.)
+    private let fallbackStunServers = [
+        "stun:stun.cloudflare.com:3478",
         "stun:stun.l.google.com:19302",
-        "stun:stun1.l.google.com:19302",
-        "stun:stun2.l.google.com:19302",
-        "stun:stun3.l.google.com:19302",
-        "stun:stun4.l.google.com:19302",
-        "stun:stun.ekiga.net",
-        "stun:stun.ideasip.com",
-        "stun:stun.schlund.de",
-        "stun:stun.stunprotocol.org:3478",
-        "stun:stun.voiparound.com",
-        "stun:stun.voipbuster.com",
-        "stun:stun.voipstunt.com",
-        "stun:stun.counterpath.com",
-        "stun:stun.1und1.de",
-        "stun:stun.gmx.net",
-        "stun:stun.internetcalls.com"
+        "stun:stun1.l.google.com:19302"
     ]
-    
-    // Production TURN servers (replace with your own)
-    private let turnServers: [RTCIceServer] = [
-        // Add your TURN server credentials here
-        // RTCIceServer(
-        //     urlStrings: ["turn:your-turn-server.com:3478"],
-        //     username: "username",
-        //     credential: "password"
-        // )
-    ]
-    
-    func getIceServers() -> [RTCIceServer] {
-        var servers: [RTCIceServer] = []
-        
-        // Add STUN servers
-        for stunUrl in stunServers {
-            servers.append(RTCIceServer(urlStrings: [stunUrl]))
-        }
-        
-        // Add TURN servers
-        servers.append(contentsOf: turnServers)
-        
-        return servers
+
+    private struct CachedServers {
+        let servers: [RTCIceServer]
+        let expiresAt: Date
     }
-    
-    func getRTCConfiguration() -> RTCConfiguration {
+
+    private var cache: CachedServers?
+    private let lock = NSLock()
+
+    private init() {}
+
+    /// Builds the configuration for a new call. Fetches TURN credentials (cached until shortly
+    /// before they expire); if that fails, falls back to STUN only rather than blocking the call.
+    func makeConfiguration() async -> RTCConfiguration {
         let config = RTCConfiguration()
-        config.iceServers = getIceServers()
+        config.iceServers = await iceServers()
         config.sdpSemantics = .unifiedPlan
         config.continualGatheringPolicy = .gatherContinually
         config.bundlePolicy = .maxBundle
@@ -59,5 +39,30 @@ class STUNTurnConfiguration {
         config.tcpCandidatePolicy = .enabled
         config.candidateNetworkPolicy = .all
         return config
+    }
+
+    private func iceServers() async -> [RTCIceServer] {
+        if let cached = lock.withLock({ cache }), cached.expiresAt > Date() {
+            return cached.servers
+        }
+        do {
+            let response = try await Backend.turnCredentials()
+            let servers = response.iceServers.compactMap { server -> RTCIceServer? in
+                guard !server.urls.isEmpty else { return nil }
+                return RTCIceServer(urlStrings: server.urls, username: server.username, credential: server.credential)
+            }
+            guard !servers.isEmpty else { return fallbackServers() }
+            // Refresh 10 minutes before expiry so a call never starts with credentials about to lapse.
+            let lifetime = max(Double(response.ttl) - 600, 60)
+            lock.withLock { cache = CachedServers(servers: servers, expiresAt: Date().addingTimeInterval(lifetime)) }
+            return servers
+        } catch {
+            debugLog("TURN credentials unavailable, using STUN only: \(error)")
+            return fallbackServers()
+        }
+    }
+
+    private func fallbackServers() -> [RTCIceServer] {
+        [RTCIceServer(urlStrings: fallbackStunServers)]
     }
 }

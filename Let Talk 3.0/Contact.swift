@@ -10,6 +10,8 @@ struct Contact: Identifiable, Hashable, Codable {
     var imageURL: String?
     var lastSeen: Date?
     var isOnline: Bool = false
+    /// The Let Talk account this contact belongs to, when known (e.g. added by QR code).
+    var userId: String? = nil
     
     var initials: String {
         let components = name.components(separatedBy: " ")
@@ -30,7 +32,7 @@ struct Contact: Identifiable, Hashable, Codable {
     
     // Codable conformance
     enum CodingKeys: String, CodingKey {
-        case id, name, phone, email, lastMessage, imageURL, lastSeen, isOnline
+        case id, name, phone, email, lastMessage, imageURL, lastSeen, isOnline, userId
     }
     
     init(id: String = UUID().uuidString, name: String, phone: String, email: String, lastMessage: String? = nil, image: UIImage? = nil) {
@@ -40,7 +42,7 @@ struct Contact: Identifiable, Hashable, Codable {
         self.email = email
         self.lastMessage = lastMessage
         self.image = image
-        self.lastSeen = Date()
+        self.lastSeen = nil   // unknown until the profile loads (it used to default to "now")
     }
     
     init(from decoder: Decoder) throws {
@@ -53,6 +55,7 @@ struct Contact: Identifiable, Hashable, Codable {
         imageURL = try container.decodeIfPresent(String.self, forKey: .imageURL)
         lastSeen = try container.decodeIfPresent(Date.self, forKey: .lastSeen)
         isOnline = try container.decodeIfPresent(Bool.self, forKey: .isOnline) ?? false
+        userId = try container.decodeIfPresent(String.self, forKey: .userId)
     }
     
     func encode(to encoder: Encoder) throws {
@@ -65,9 +68,11 @@ struct Contact: Identifiable, Hashable, Codable {
         try container.encodeIfPresent(imageURL, forKey: .imageURL)
         try container.encodeIfPresent(lastSeen, forKey: .lastSeen)
         try container.encode(isOnline, forKey: .isOnline)
+        try container.encodeIfPresent(userId, forKey: .userId)
     }
     
     // Sample contacts for preview and testing
+    #if DEBUG
     static var sampleContacts: [Contact] = [
         Contact(name: "John Doe", phone: "(555) 123-4567", email: "john@example.com", lastMessage: "Hey, how are you?"),
         Contact(name: "Jane Smith", phone: "(555) 987-6543", email: "jane@example.com", lastMessage: "Can we meet tomorrow?"),
@@ -75,4 +80,5 @@ struct Contact: Identifiable, Hashable, Codable {
         Contact(name: "Sarah Wilson", phone: "(555) 234-5678", email: "sarah@example.com", lastMessage: "See you soon!"),
         Contact(name: "Mike Brown", phone: "(555) 876-5432", email: "mike@example.com", lastMessage: "Great work!")
     ]
+    #endif
 }

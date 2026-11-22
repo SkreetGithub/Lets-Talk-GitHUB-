@@ -2,26 +2,30 @@ import Foundation
 import Supabase
 import WebRTC
 
-// NOTE: Firebase has been removed. This class name is kept to avoid rewriting
-// large parts of the UI/WebRTC stack, but the implementation now uses Supabase.
-final class FirebaseSignalingService: ObservableObject {
-    static let shared = FirebaseSignalingService()
+// Call signaling over Supabase (calls + signaling tables / realtime).
+final class SupabaseSignalingService: ObservableObject {
+    static let shared = SupabaseSignalingService()
 
     private let client = SupabaseManager.client
 
-    // Weak multi-cast delegate list so both WebRTC managers can listen.
+    // Weak multi-cast delegate list. Only WebRTCCallManager registers now (WebRTCService no longer does).
     private let delegates = NSHashTable<AnyObject>.weakObjects()
 
-    private var callPollTimers: [String: Timer] = [:]
-    private var messagePollTimers: [String: Timer] = [:]
+    // Polling runs in Tasks, not Timers: Timer.scheduledTimer only fires on a thread with a
+    // running run loop, and these were started from async (background) code, so after the first
+    // poll they never fired again. Offers, answers and ICE candidates were never received.
+    private var callPollTasks: [String: Task<Void, Never>] = [:]
+    private var messagePollTasks: [String: Task<Void, Never>] = [:]
     private var processedMessageIdsByCall: [String: Set<String>] = [:]
-    private var incomingCallsTimer: Timer?
+    private var incomingCallsTask: Task<Void, Never>?
+    private var announcedIncomingCallIds: Set<String> = []
+    private let lock = NSLock()
 
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        return d
-    }()
+    /// Incoming calls older than this are treated as stale (e.g. the caller's app crashed).
+    private let incomingCallMaxAge: TimeInterval = 45
+
+    // .iso8601 rejects Supabase's fractional seconds ("...04.174123+00:00"), so rows failed to decode.
+    private let decoder: JSONDecoder = PostgresDate.decoder
 
     private init() {}
 
@@ -31,17 +35,17 @@ final class FirebaseSignalingService: ObservableObject {
 
     // MARK: - Delegate Management
 
-    func addDelegate(_ delegate: FirebaseSignalingDelegate) {
+    func addDelegate(_ delegate: SupabaseSignalingDelegate) {
         delegates.add(delegate)
     }
 
-    func removeDelegate(_ delegate: FirebaseSignalingDelegate) {
+    func removeDelegate(_ delegate: SupabaseSignalingDelegate) {
         delegates.remove(delegate)
     }
 
-    private func notify(_ block: (FirebaseSignalingDelegate) -> Void) {
+    private func notify(_ block: (SupabaseSignalingDelegate) -> Void) {
         for obj in delegates.allObjects {
-            guard let d = obj as? FirebaseSignalingDelegate else { continue }
+            guard let d = obj as? SupabaseSignalingDelegate else { continue }
             block(d)
         }
     }
@@ -83,6 +87,12 @@ final class FirebaseSignalingService: ObservableObject {
             .execute()
 
         listenForCallUpdates(callId: callId)
+
+        // Ring the callee even if their app is closed (PushKit VoIP via Edge Function). Best effort.
+        let callerName = AuthManager.shared.currentUser?.name ?? "Let Talk"
+        Task {
+            try? await Backend.sendVoIPPush(calleeId: targetUserId, callerName: callerName, callId: callId, video: isVideo)
+        }
         return callId
     }
 
@@ -134,6 +144,34 @@ final class FirebaseSignalingService: ObservableObject {
         stopListening(callId: callId)
     }
 
+    /// True if I've blocked this caller. Asks the server each time (a block made on another
+    /// device counts straight away). If the check fails, the call rings as usual.
+    private func isBlocked(callerId: String, me: String) async -> Bool {
+        struct BlockRow: Decodable { let blocked_id: String }
+        let ids = Array(Set([callerId, callerId.lowercased(), callerId.uppercased()]))
+        do {
+            let response = try await client.from("blocks")
+                .select("blocked_id")
+                .eq("blocker_id", value: me.lowercased())
+                .in("blocked_id", values: ids)
+                .limit(1)
+                .execute()
+            return !(try JSONDecoder().decode([BlockRow].self, from: response.data)).isEmpty
+        } catch {
+            return false
+        }
+    }
+
+    /// Marks an unanswered outgoing call as missed (stops the other phone ringing).
+    func markMissed(callId: String) async throws {
+        _ = try await client.from("calls")
+            .update(CallUpdate(status: CallStatus.missed.rawValue, endedAt: ISO8601DateFormatter().string(from: Date())))
+            .eq("id", value: callId)
+            .eq("status", value: CallStatus.initiated.rawValue)
+            .execute()
+        stopListening(callId: callId)
+    }
+
     // MARK: - Signaling Messages
 
     func sendOffer(callId: String, offer: RTCSessionDescription) async throws {
@@ -178,28 +216,41 @@ final class FirebaseSignalingService: ObservableObject {
 
     // MARK: - Listening
 
-    func startListeningForIncomingCalls() {
-        incomingCallsTimer?.invalidate()
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock(); defer { lock.unlock() }
+        return body()
+    }
 
-        incomingCallsTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task {
-                await self.pollIncomingCalls()
+    /// Runs `body` now and then every `seconds` until cancelled. Polls never overlap.
+    private func pollingTask(every seconds: Double, _ body: @escaping () async -> Void) -> Task<Void, Never> {
+        Task.detached(priority: .userInitiated) {
+            while !Task.isCancelled {
+                await body()
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             }
         }
+    }
 
-        // Fire immediately.
-        Task { await pollIncomingCalls() }
+    func startListeningForIncomingCalls() {
+        let task = pollingTask(every: 1.5) { [weak self] in
+            await self?.pollIncomingCalls()
+        }
+        withLock {
+            incomingCallsTask?.cancel()
+            incomingCallsTask = task
+        }
     }
 
     private func pollIncomingCalls() async {
         guard let currentUserId = AuthManager.shared.currentUserId else { return }
+        let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-incomingCallMaxAge))
 
         do {
             let response = try await client.from("calls")
                 .select()
                 .eq("callee_id", value: currentUserId)
                 .eq("status", value: CallStatus.initiated.rawValue)
+                .gte("created_at", value: cutoff)          // ignore stale rows that would ring forever
                 .order("created_at", ascending: false)
                 .limit(5)
                 .execute()
@@ -207,24 +258,43 @@ final class FirebaseSignalingService: ObservableObject {
             let calls = try decoder.decode([CallRowData].self, from: response.data)
 
             for call in calls {
-                notify { $0.firebaseSignaling(self, didReceiveIncomingCall: call.asCall) }
+                // Announce each call once (it used to be re-announced every 1.5 s).
+                let isNew = withLock { announcedIncomingCallIds.insert(call.id).inserted }
+                guard isNew else { continue }
+                // Someone I've blocked: decline it quietly, with no call screen or ringing.
+                if await isBlocked(callerId: call.callerId, me: currentUserId) {
+                    try? await rejectCall(callId: call.id)
+                    continue
+                }
+                notify { $0.supabaseSignaling(self, didReceiveIncomingCall: call.asCall) }
             }
         } catch {
-            notify { $0.firebaseSignaling(self, didReceiveError: error) }
+            debugLog("Incoming-call poll failed: \(error)")
         }
     }
 
+    /// One-off read of a call's status (CallKit uses it to stop ringing when the caller hangs up
+    /// while the app is in the background).
+    func fetchCallStatus(callId: String) async -> CallStatus? {
+        guard let response = try? await client.from("calls").select().eq("id", value: callId).single().execute(),
+              let row = try? decoder.decode(CallRowData.self, from: response.data) else { return nil }
+        return row.asCall.status
+    }
+
+    /// Watches a call row (answered / rejected / ended / missed). Used by the caller, and by the
+    /// callee while ringing so it stops ringing if the caller hangs up first.
+    func watchCall(callId: String) {
+        listenForCallUpdates(callId: callId)
+    }
+
     private func listenForCallUpdates(callId: String) {
-        callPollTimers[callId]?.invalidate()
-
-        callPollTimers[callId] = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task {
-                await self.pollCall(callId: callId)
-            }
+        let task = pollingTask(every: 1.0) { [weak self] in
+            await self?.pollCall(callId: callId)
         }
-
-        Task { await pollCall(callId: callId) }
+        withLock {
+            callPollTasks[callId]?.cancel()
+            callPollTasks[callId] = task
+        }
     }
 
     private func pollCall(callId: String) async {
@@ -236,27 +306,21 @@ final class FirebaseSignalingService: ObservableObject {
                 .execute()
 
             let row = try decoder.decode(CallRowData.self, from: response.data)
-            notify { $0.firebaseSignaling(self, didReceiveCallUpdate: row.asCall) }
+            notify { $0.supabaseSignaling(self, didReceiveCallUpdate: row.asCall) }
         } catch {
-            notify { $0.firebaseSignaling(self, didReceiveError: error) }
+            debugLog("Call poll failed: \(error)")
         }
     }
 
     func listenForSignalingMessages(callId: String) {
-        messagePollTimers[callId]?.invalidate()
-
-        if processedMessageIdsByCall[callId] == nil {
-            processedMessageIdsByCall[callId] = []
+        let task = pollingTask(every: 0.5) { [weak self] in
+            await self?.pollSignals(callId: callId)
         }
-
-        messagePollTimers[callId] = Timer.scheduledTimer(withTimeInterval: 0.75, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task {
-                await self.pollSignals(callId: callId)
-            }
+        withLock {
+            if processedMessageIdsByCall[callId] == nil { processedMessageIdsByCall[callId] = [] }
+            messagePollTasks[callId]?.cancel()
+            messagePollTasks[callId] = task
         }
-
-        Task { await pollSignals(callId: callId) }
     }
 
     private func pollSignals(callId: String) async {
@@ -265,62 +329,62 @@ final class FirebaseSignalingService: ObservableObject {
                 .select()
                 .eq("call_id", value: callId)
                 .order("timestamp", ascending: true)
-                .limit(200)
+                .limit(500)
                 .execute()
 
             let rows = try decoder.decode([SignalRow].self, from: response.data)
+            let me = AuthManager.shared.currentUserId
 
-            var processed = processedMessageIdsByCall[callId] ?? []
-
-            for row in rows {
-                if processed.contains(row.id) { continue }
-                processed.insert(row.id)
-
-                // Only process messages from other users
-                if row.senderId == AuthManager.shared.currentUserId {
-                    continue
+            let fresh: [SignalRow] = withLock {
+                var processed = processedMessageIdsByCall[callId] ?? []
+                var out: [SignalRow] = []
+                for row in rows where !processed.contains(row.id) {
+                    processed.insert(row.id)
+                    if row.senderId != me { out.append(row) }   // only the other side's messages
                 }
-
-                notify { $0.firebaseSignaling(self, didReceiveSignalingMessage: row.asSignalingMessage) }
+                processedMessageIdsByCall[callId] = processed
+                return out
             }
 
-            processedMessageIdsByCall[callId] = processed
+            // Offers/answers first, so ICE candidates in the same batch have a description to attach to.
+            let ordered = fresh.filter { $0.type != SignalingMessageType.iceCandidate.rawValue }
+                + fresh.filter { $0.type == SignalingMessageType.iceCandidate.rawValue }
+            for row in ordered {
+                notify { $0.supabaseSignaling(self, didReceiveSignalingMessage: row.asSignalingMessage) }
+            }
         } catch {
-            notify { $0.firebaseSignaling(self, didReceiveError: error) }
+            debugLog("Signal poll failed: \(error)")
         }
     }
 
     func stopListening(callId: String) {
-        callPollTimers[callId]?.invalidate()
-        callPollTimers.removeValue(forKey: callId)
-
-        messagePollTimers[callId]?.invalidate()
-        messagePollTimers.removeValue(forKey: callId)
-
-        processedMessageIdsByCall.removeValue(forKey: callId)
+        withLock {
+            callPollTasks.removeValue(forKey: callId)?.cancel()
+            messagePollTasks.removeValue(forKey: callId)?.cancel()
+            processedMessageIdsByCall.removeValue(forKey: callId)
+        }
     }
 
     private func removeAllListeners() {
-        incomingCallsTimer?.invalidate()
-        incomingCallsTimer = nil
-
-        callPollTimers.values.forEach { $0.invalidate() }
-        callPollTimers.removeAll()
-
-        messagePollTimers.values.forEach { $0.invalidate() }
-        messagePollTimers.removeAll()
-
-        processedMessageIdsByCall.removeAll()
+        withLock {
+            incomingCallsTask?.cancel()
+            incomingCallsTask = nil
+            callPollTasks.values.forEach { $0.cancel() }
+            callPollTasks.removeAll()
+            messagePollTasks.values.forEach { $0.cancel() }
+            messagePollTasks.removeAll()
+            processedMessageIdsByCall.removeAll()
+        }
     }
 }
 
 // MARK: - Delegate
 
-protocol FirebaseSignalingDelegate: AnyObject {
-    func firebaseSignaling(_ service: FirebaseSignalingService, didReceiveCallUpdate call: Call)
-    func firebaseSignaling(_ service: FirebaseSignalingService, didReceiveIncomingCall call: Call)
-    func firebaseSignaling(_ service: FirebaseSignalingService, didReceiveSignalingMessage message: SignalingMessage)
-    func firebaseSignaling(_ service: FirebaseSignalingService, didReceiveError error: Error)
+protocol SupabaseSignalingDelegate: AnyObject {
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveCallUpdate call: Call)
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveIncomingCall call: Call)
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveSignalingMessage message: SignalingMessage)
+    func supabaseSignaling(_ service: SupabaseSignalingService, didReceiveError error: Error)
 }
 
 // MARK: - Data Models

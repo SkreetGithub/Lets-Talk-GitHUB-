@@ -292,7 +292,7 @@ struct VideoStreamView: View, TranslationEnabled {
             try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: .allowBluetooth)
             try audioSession.setActive(true)
         } catch {
-            print("Failed to set up audio session: \(error)")
+            debugLog("Failed to set up audio session: \(error)")
         }
     }
 
@@ -302,7 +302,7 @@ struct VideoStreamView: View, TranslationEnabled {
             errorMessage = error.localizedDescription
             showErrorAlert = true
         case .connected:
-            print("Video streaming connected")
+            debugLog("Video streaming connected")
         default:
             break
         }
