@@ -16,6 +16,7 @@
     <meta property="og:title" content="Let Talk — Translated calls and messages">
     <meta property="og:description" content="Talk with anyone in their own language. Let Talk translates your voice calls, video calls and messages in real time on iPhone.">
     <meta name="twitter:card" content="summary">
+    <meta property="og:image" content="https://lettalkapp.com/assets/icon-512.png">
     <meta name="twitter:title" content="Let Talk — Translated calls and messages">
     <meta name="twitter:description" content="Talk with anyone in their own language. Let Talk translates your voice calls, video calls and messages in real time on iPhone.">
     <script type="application/ld+json">
@@ -36,14 +37,28 @@
     </script>
     <script>document.documentElement.className = 'js';</script>
     <link rel="stylesheet" href="/landing-styles.css">
+    <!-- Source tracking: lettalkapp.com/?src=tiktok etc. -> Apple App Analytics campaign (pt/ct) -->
+    <script>
+    (function(){var q=new URLSearchParams(location.search),k='lt_src',v=(q.get('src')||q.get('utm_source')||'').toLowerCase().replace(/[^a-z0-9_-]/g,'').slice(0,40);
+    try{if(v){sessionStorage.setItem(k,v)}else{v=sessionStorage.getItem(k)||''}}catch(e){}
+    if(!v){var r=document.referrer;v=/instagram/.test(r)?'instagram':/facebook|fb\./.test(r)?'facebook':/tiktok/.test(r)?'tiktok':/google\./.test(r)?'google':r?'referral':'direct'}
+    window.LT_SRC=v;var ct='web-'+v;
+    function tag(){document.querySelectorAll('a[href*="apps.apple.com"]').forEach(function(a){var u=new URL(a.href);u.searchParams.set('pt','125247212');u.searchParams.set('ct',ct);u.searchParams.set('mt','8');a.href=u.toString()})}
+    if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',tag)}else{tag()}})();
+    </script>
     <!-- Meta Pixel (Let Talk Website, dataset 1687391939764616) -->
     <script>
     !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
     fbq('init','1687391939764616');fbq('track','PageView');
-    document.addEventListener('click',function(ev){var a=ev.target.closest&&ev.target.closest('a[href*="apps.apple.com"]');if(a&&window.fbq){fbq('trackCustom','AppStoreClick',{placement:(a.className||'link').toString().slice(0,40)});fbq('track','Lead',{content_name:'App Store click'});}},true);
+    document.addEventListener('click',function(ev){var a=ev.target.closest&&ev.target.closest('a[href*="apps.apple.com"]');if(a&&window.fbq){fbq('trackCustom','AppStoreClick',{placement:(a.className||'link').toString().slice(0,40),source:window.LT_SRC||'direct'});fbq('track','Lead',{content_name:'App Store click',content_category:window.LT_SRC||'direct'});}},true);
     </script>
     <noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=1687391939764616&ev=PageView&noscript=1" alt=""/></noscript>
     <!-- End Meta Pixel -->
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="96x96" href="/assets/favicon-96.png">
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+    <link rel="manifest" href="/site.webmanifest">
 </head>
 <body>
     <a class="skip" href="#main">Skip to content</a>
