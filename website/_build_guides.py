@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Generates the Let Talk keyword/guide pages into website/<slug>/index.html.
 Run from repo root: python3 website/_build_guides.py
-Facts used (from the app + support page): iPhone app; both people need Let Talk; one-time purchase,
-no subscription; 44 languages in the in-app list; messages show the original one tap away with read
+Facts used (from the app + support page): iPhone app; both people need Let Talk; free to download; 44 languages in the in-app list; messages show the original one tap away with read
 receipts; calls: speech -> text -> translation -> subtitles + spoken translation; 8 male + 8 female voices;
 calls encrypted in transit; QR add; voice cloning is *coming in 2.0* (not available).
 """
@@ -60,7 +59,7 @@ FOOTER = f"""<footer class="gf"><div class="wrap">
 <nav aria-label="Footer"><a href="/">Home</a><a href="/translate-phone-calls/">Translate phone calls</a><a href="/video-call-translator/">Video call translator</a><a href="/translate-text-messages/">Translate messages</a><a href="/languages/">Languages</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="/support/">Support</a></nav>
 </div></footer>"""
 
-def band(title="Talk to anyone in their language", sub="Let Talk is a one-time purchase on the App Store. No subscription, no per-minute charges for translation."):
+def band(title="Talk to anyone in their language", sub="Let Talk is free to download on the App Store for iPhone."):
     return f"""<div class="wrap"><div class="band">
 <h2>{title}</h2><p>{sub}</p>
 <a class="btn btn-primary" href="{APP}">Download Let Talk for iPhone →</a>
@@ -81,7 +80,7 @@ def page(path, title, desc, h1, eyebrow, lede, body, faqs, crumb):
        "about":{"@id":SITE+"/#app"}},
       {"@type":"MobileApplication","@id":SITE+"/#app","name":"Let Talk","alternateName":"LetTalk","operatingSystem":"iOS",
        "applicationCategory":"UtilitiesApplication","url":SITE+"/","downloadUrl":APP,
-       "offers":{"@type":"Offer","price":"4.99","priceCurrency":"USD"}},
+       "offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}},
       {"@type":"BreadcrumbList","itemListElement":[
         {"@type":"ListItem","position":1,"name":"Let Talk","item":SITE+"/"},
         {"@type":"ListItem","position":2,"name":crumb,"item":url}]},
@@ -119,7 +118,7 @@ def page(path, title, desc, h1, eyebrow, lede, body, faqs, crumb):
 <p class="eyebrow">{eyebrow}</p>
 <h1>{h1}</h1>
 <p class="lede">{lede}</p>
-<div class="cta-row"><a class="btn btn-primary" href="{APP}">Get Let Talk on the App Store →</a><span class="cta-note">iPhone · one-time purchase · no subscription</span></div>
+<div class="cta-row"><a class="btn btn-primary" href="{APP}">Get Let Talk on the App Store →</a><span class="cta-note">iPhone · free download</span></div>
 </div></section>
 {body}
 {faq_sec}
@@ -140,7 +139,7 @@ def related(exclude):
 
 COMMON_FAQ = [
  ("Does the other person need Let Talk?","Yes. Translated calls and messages work between two Let Talk accounts, so the person you're talking to installs Let Talk too. You can add each other by phone number or by scanning a QR code."),
- ("How much does Let Talk cost?","Let Talk is a one-time purchase on the App Store. There is no subscription and no per-minute charge for calls or translation."),
+ ("How much does Let Talk cost?","Let Talk is free to download on the App Store."),
  ("Is Let Talk available on Android?","Let Talk is available for iPhone today."),
 ]
 
@@ -185,7 +184,7 @@ pages.append(dict(path="/translate-phone-calls/",
 <tr><td>Both sides hear their own language</td><td>Yes</td><td>One side at a time</td></tr>
 <tr><td>Subtitles on screen</td><td>Yes</td><td>Varies</td></tr>
 <tr><td>Video calls and messages too</td><td>Yes, in the same app</td><td>Usually separate apps</td></tr>
-<tr><td>Price</td><td>One-time purchase</td><td>Often a subscription</td></tr>
+<tr><td>Price</td><td>Free to download</td><td>Often a paid subscription</td></tr>
 </table></div>
 </div></section>
 {related("/translate-phone-calls/")}""",
@@ -197,7 +196,7 @@ pages.append(dict(path="/translate-phone-calls/",
 # 2. Video call translator
 pages.append(dict(path="/video-call-translator/",
  title="Video Call Translator with Live Subtitles | Let Talk for iPhone",
- desc="Translate video calls live with Let Talk. See each other face to face with translated subtitles and translated speech in 44 languages. iPhone, one-time purchase.",
+ desc="Translate video calls live with Let Talk. See each other face to face with translated subtitles and translated speech in 44 languages. iPhone, free download.",
  crumb="Video call translator", eyebrow="Live translated video calls",
  h1='Video calls with <span class="grad">live translated subtitles.</span>',
  lede="See the person you're talking to and understand every word. Let Talk adds translated subtitles and spoken translation to one-on-one video calls on iPhone.",
